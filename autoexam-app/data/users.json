@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "demo",
+      "password": "demo123",
+      "name": "Демо",
+      "email": "demo@autoexam.ru",
+      "theme": "light",
+      "avatar": "/avatar.png",
+      "registeredAt": "2025-01-15T10:00:00Z"
+    }
+  ]
+}
+

@@ -1,0 +1,40 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --toast-bg: #ffffff;
+    --toast-color: #1f2937;
+  }
+
+  .dark {
+    --toast-bg: #1f2937;
+    --toast-color: #f3f4f6;
+  }
+
+  /* Предотвращаем белую вспышку при переходах */
+  html,
+  body {
+    background-color: #f9fafb;
+    transition: background-color 0.2s ease;
+  }
+
+  html.dark,
+  html.dark body {
+    background-color: #111827;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  .animation-delay-2000 {
+    animation-delay: 2s;
+  }
+  .animation-delay-4000 {
+    animation-delay: 4s;
+  }
+}

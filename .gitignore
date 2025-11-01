@@ -1,0 +1,5 @@
+*.zip
+.venv
+.env
+/node_modules
+/autoexam-app/node_modules

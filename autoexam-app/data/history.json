@@ -1,0 +1,15 @@
+{
+  "history": [
+    {
+      "id": "sample-001",
+      "userId": 1,
+      "filename": "exam_sample.csv",
+      "uploadedAt": "2025-01-20T14:30:00Z",
+      "status": "completed",
+      "totalRecords": 150,
+      "averageScore": 1.7,
+      "resultsUrl": "/results/sample-001"
+    }
+  ]
+}
+
