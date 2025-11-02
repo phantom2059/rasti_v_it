@@ -123,10 +123,25 @@ export const getHistoryAPI = async () => {
   }
 };
 
-export const pollResultsAPI = async (id, { intervalMs = 2000, maxAttempts = 360 } = {}) => {
+export const pollResultsAPI = async (id, { intervalMs = 2000, maxAttempts = 360, onProgress } = {}) => {
   let attempts = 0;
   while (attempts < maxAttempts) {
     const data = await getResultsAPI(id);
+    
+    // Обработка прогресса на основе статуса
+    if (onProgress) {
+      if (data.status === 'queued') {
+        onProgress(5); // Файл загружен, очередь
+      } else if (data.status === 'processing') {
+        // Если обрабатывается, предполагаем прогресс 20-90%
+        // Будем увеличивать постепенно
+        const baseProgress = 20 + Math.min(70, attempts * 2);
+        onProgress(baseProgress);
+      } else if (data.status === 'completed') {
+        onProgress(100);
+      }
+    }
+    
     if (data.status === 'completed') return data;
     if (data.status === 'failed') throw new Error('Обработка завершилась с ошибкой');
     await new Promise((r) => setTimeout(r, intervalMs));

@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
 ADAPTER_PATH = "qwen_sft_exam"
 
-MAX_SEQ_LENGTH = 1024
+MAX_SEQ_LENGTH = 512
 MAX_NEW_TOKENS = 512
 REQUEST_TIMEOUT = 50
 

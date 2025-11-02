@@ -106,37 +106,132 @@ const AboutPage = () => {
         </div>
       </section>
 
-      {/* Три поля с текстом */}
+      {/* Описание Frontend и ML решений */}
       <section className="relative z-10 py-12 sm:py-20 px-6 lg:px-8 xl:px-12 flex-grow">
         <div className="container mx-auto max-w-5xl">
           <h2 className="text-2xl sm:text-3xl font-bold text-gray-800 dark:text-gray-100 mb-8 sm:mb-12 text-center">
-            Из чего состоит наше решение?
+            Как работает наше решение?
           </h2>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6 sm:gap-8">
-            {/* Бекенд */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-100 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-600 transition-all">
-              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">Backend</h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Основа веб-сервиса: без бекенд-составляющей невозможен хост и запуск
-              </p>
+          
+          {/* Frontend решение */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 sm:p-8 mb-8 border border-gray-100 dark:border-gray-700"
+          >
+            <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+              <span className="mr-3"></span>
+              Frontend решение
+            </h3>
+            <div className="space-y-4 text-gray-700 dark:text-gray-300">
+              <p className="text-lg font-semibold">Технологический стек:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li><strong>React</strong> — современная библиотека для создания пользовательских интерфейсов с компонентной архитектурой</li>
+                <li><strong>Vite</strong> — быстрый сборщик и dev-сервер для мгновенной перезагрузки модулей</li>
+                <li><strong>TailwindCSS</strong> — utility-first CSS фреймворк для быстрой стилизации</li>
+                <li><strong>Framer Motion</strong> — библиотека для плавных анимаций и переходов</li>
+                <li><strong>React Router</strong> — маршрутизация для одностраничных приложений (SPA)</li>
+              </ul>
+              
+              <p className="text-lg font-semibold mt-6">Как это работает:</p>
+              <ol className="list-decimal list-inside space-y-2 ml-4">
+                <li>Пользователь загружает CSV файл через удобный интерфейс drag-and-drop или выбор файла</li>
+                <li>Frontend отправляет файл на сервер через REST API с отслеживанием прогресса загрузки</li>
+                <li>В реальном времени отображается прогресс обработки с детальными статусами каждого этапа</li>
+                <li>После завершения обработки пользователь получает уведомление и может скачать обработанный файл</li>
+                <li>Все данные передаются через защищенные API endpoints с обработкой ошибок</li>
+              </ol>
+              
+              <p className="text-lg font-semibold mt-6">Преимущества:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Адаптивный дизайн для всех устройств (десктоп, планшет, мобильный)</li>
+                <li>Темная и светлая темы для комфортной работы</li>
+                <li>Мгновенная обратная связь через визуальные индикаторы прогресса</li>
+                <li>Интуитивный интерфейс без необходимости изучения документации</li>
+              </ul>
             </div>
+          </motion.div>
 
-            {/* ML */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-100 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-600 transition-all">
-              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">ML</h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Важнейшая часть решения - именно ML составляющая позволяет с высокой точностью выставить оценки участникам экзамена
-              </p>
+          {/* ML решение */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.2 }}
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 sm:p-8 mb-8 border border-gray-100 dark:border-gray-700"
+          >
+            <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+              <span className="mr-3"></span>
+              ML решение
+            </h3>
+            <div className="space-y-4 text-gray-700 dark:text-gray-300">
+              <p className="text-lg font-semibold">Архитектура модели:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li><strong>Qwen2.5-VL-3B-Instruct</strong> — мультимодальная языковая модель с поддержкой изображений и текста</li>
+                <li><strong>LoRA адаптер</strong> — тонкая настройка модели на специфических данных экзаменов</li>
+                <li><strong>RuBERT-tiny2</strong> — компактная модель для вычисления семантической схожести текстов</li>
+                <li><strong>4-bit квантование</strong> — оптимизация памяти GPU для работы на доступном оборудовании</li>
+              </ul>
+              
+              <p className="text-lg font-semibold mt-6">Процесс обработки (5 этапов):</p>
+              <ol className="list-decimal list-inside space-y-3 ml-4">
+                <li><strong>Нормализация данных</strong> — очистка HTML-тегов, определение типа задания (диалог или описание картинки)</li>
+                <li><strong>Генерация подписей к изображениям</strong> — мультимодальная модель создает описания изображений для заданий с картинками</li>
+                <li><strong>Сжатие транскрибаций</strong> — извлечение ключевого описания картинки из полной транскрибации ответа студента</li>
+                <li><strong>Вычисление семантической схожести</strong> — сравнение описания студента с эталонным описанием модели через векторные представления RuBERT</li>
+                <li><strong>Генерация оценок</strong> — финальная модель оценивает ответ по критериям (коммуникативная задача, полнота предложений, схожесть с изображением)</li>
+              </ol>
+              
+              <p className="text-lg font-semibold mt-6">Критерии оценки:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Ошибки в отдельных словах и единичные несогласованности фраз не считаются ошибкой</li>
+                <li>Тестируемый должен выполнить коммуникативную задачу (ответить на вопрос или добиться ответа)</li>
+                <li>Предложения должны быть преимущественно полными</li>
+                <li>Для заданий с изображениями учитывается схожесть описания с эталонным</li>
+              </ul>
+              
+              <p className="text-lg font-semibold mt-6">Преимущества:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li>Автоматическая оценка без участия человека — экономия времени и ресурсов</li>
+                <li>Объективность оценки — модель не подвержена субъективным факторам</li>
+                <li>Масштабируемость — обработка тысяч файлов одновременно</li>
+                <li>Консистентность — одинаковые ответы получают одинаковые оценки</li>
+                <li>Обработка мультимодальных данных — текст и изображения анализируются совместно</li>
+              </ul>
             </div>
+          </motion.div>
 
-            {/* Фронтенд */}
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-6 border border-gray-100 dark:border-gray-700 hover:border-blue-200 dark:hover:border-blue-600 transition-all">
-              <h3 className="text-xl font-bold text-gray-800 dark:text-gray-100 mb-4">Frontend</h3>
-              <p className="text-gray-600 dark:text-gray-400">
-                Отвечает за UI/UX - восприятие интерфейса пользователем. Ключевой показатель "успешного" сервиса - дружелюбный и понятный интерфейс
-              </p>
+          {/* Backend решение */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.3 }}
+            className="bg-white dark:bg-gray-800 rounded-xl shadow-lg p-6 sm:p-8 border border-gray-100 dark:border-gray-700"
+          >
+            <h3 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-4 flex items-center">
+              <span className="mr-3"></span>
+              Backend решение
+            </h3>
+            <div className="space-y-4 text-gray-700 dark:text-gray-300">
+              <p className="text-lg font-semibold">Технологический стек:</p>
+              <ul className="list-disc list-inside space-y-2 ml-4">
+                <li><strong>FastAPI</strong> — современный веб-фреймворк для Python с высокой производительностью</li>
+                <li><strong>Uvicorn</strong> — ASGI сервер для запуска FastAPI приложений</li>
+                <li><strong>Pandas</strong> — обработка и анализ данных CSV файлов</li>
+                <li><strong>Transformers</strong> — библиотека для работы с моделями машинного обучения</li>
+                <li><strong>PyTorch</strong> — фреймворк для глубокого обучения с поддержкой CUDA</li>
+              </ul>
+              
+              <p className="text-lg font-semibold mt-6">Как это работает:</p>
+              <ol className="list-decimal list-inside space-y-2 ml-4">
+                <li>Сервер принимает CSV файл через REST API endpoint</li>
+                <li>Файл сохраняется и запускается фоновая задача обработки</li>
+                <li>ML-пайплайн последовательно обрабатывает данные через 5 этапов</li>
+                <li>Результаты сохраняются в JSON и CSV форматах</li>
+                <li>Пользователь получает уведомление о завершении и может скачать результат</li>
+              </ol>
             </div>
-          </div>
+          </motion.div>
         </div>
       </section>
 

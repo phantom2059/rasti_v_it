@@ -3,3 +3,10 @@
 .env
 /node_modules
 /autoexam-app/node_modules
+
+# ML модели и хранилища
+autoexam-app/qwen_sft_exam/adapter_model.safetensors
+autoexam-app/qwen_sft_exam/tokenizer.json
+autoexam-app/storage/
+autoexam-app/__pycache__/
+*.pyc

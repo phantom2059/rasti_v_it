@@ -17,6 +17,8 @@ const MainPage = () => {
   const [isUploadModalVisible, setIsUploadModalVisible] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [processingStatus, setProcessingStatus] = useState(''); // Для статуса обработки
+  const [resultId, setResultId] = useState(null); // ID результата для скачивания
 
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
@@ -24,27 +26,58 @@ const MainPage = () => {
 
   const handleFileSelect = async (file) => {
     setIsProcessing(true);
+    setUploadProgress(0);
+    setProcessingStatus('Загрузка файла...');
+    setResultId(null);
+    
     try {
+      // Загрузка файла
       const result = await uploadFileAPI(file, (progress) => {
-        setUploadProgress(progress);
+        setUploadProgress(Math.min(progress, 10)); // Загрузка файла - только первые 10%
+        setProcessingStatus(`Загрузка файла: ${progress}%`);
       });
 
+      setResultId(result.id);
+      setProcessingStatus('Файл загружен, начинается обработка...');
+      setUploadProgress(10);
+
       // Поллинг результата до завершения
-      const data = await pollResultsAPI(result.id);
+      const data = await pollResultsAPI(result.id, {
+        onProgress: (progress) => {
+          setUploadProgress(progress);
+          if (progress < 30) {
+            setProcessingStatus('Нормализация данных...');
+          } else if (progress < 50) {
+            setProcessingStatus('Генерация подписей к изображениям...');
+          } else if (progress < 70) {
+            setProcessingStatus('Обработка транскрибаций...');
+          } else if (progress < 90) {
+            setProcessingStatus('Вычисление семантической схожести...');
+          } else if (progress < 100) {
+            setProcessingStatus('Генерация оценок...');
+          } else {
+            setProcessingStatus('Обработка завершена!');
+          }
+        }
+      });
 
-      // Автоскачивание CSV
-      const url = getDownloadUrl(result.id);
-      window.open(url, '_blank');
-
-      toast.success('Обработка завершена, скачивание началось');
-      setIsProcessing(false);
-      setIsUploadModalVisible(false);
-      setUploadProgress(0);
+      toast.success('Обработка завершена успешно!');
+      setUploadProgress(100);
+      setProcessingStatus('Обработка завершена!');
 
     } catch (error) {
-      toast.error('Ошибка при обработке файла');
+      toast.error('Ошибка при обработке файла: ' + (error.message || 'Неизвестная ошибка'));
+      setProcessingStatus('Ошибка при обработке');
       setIsProcessing(false);
       setUploadProgress(0);
+      setResultId(null);
+    }
+  };
+
+  const handleDownload = () => {
+    if (resultId) {
+      const url = getDownloadUrl(resultId);
+      window.open(url, '_blank');
     }
   };
 
@@ -281,7 +314,47 @@ const MainPage = () => {
                 progress={uploadProgress}
               />
 
-              {!isProcessing && (
+              {/* Статус обработки */}
+              {isProcessing && processingStatus && (
+                <div className="mt-4 text-center">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                    {processingStatus}
+                  </p>
+                </div>
+              )}
+
+              {/* Кнопка скачивания после завершения */}
+              {!isProcessing && resultId && uploadProgress === 100 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-4"
+                >
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={handleDownload}
+                    className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white py-3 rounded-lg font-medium hover:from-green-700 hover:to-green-800 transition-all shadow-lg"
+                  >
+                    📥 Скачать обработанный файл
+                  </motion.button>
+                  <motion.button
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => {
+                      setIsUploadModalVisible(false);
+                      setResultId(null);
+                      setUploadProgress(0);
+                      setProcessingStatus('');
+                    }}
+                    className="mt-2 w-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+                  >
+                    Закрыть
+                  </motion.button>
+                </motion.div>
+              )}
+
+              {!isProcessing && !resultId && (
                 <motion.button
                   whileHover={{ scale: 1.02 }}
                   whileTap={{ scale: 0.98 }}
