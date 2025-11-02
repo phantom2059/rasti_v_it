@@ -275,6 +275,9 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
     model, tokenizer = get_text_model_and_tokenizer()
     logger.info(f"[inference] Запуск батчевого предсказания для {len(prompts)} примеров")
     start = time.time()
+    
+    # Токенизация
+    logger.info(f"[inference] Токенизация {len(prompts)} промптов...")
     inputs = tokenizer(
         prompts,
         return_tensors="pt",
@@ -282,7 +285,10 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
         truncation=True,
         max_length=MAX_SEQ_LENGTH,
     ).to(model.device)
+    logger.info(f"[inference] Токенизация завершена")
 
+    # Генерация
+    logger.info(f"[inference] Запуск генерации модели...")
     with torch.inference_mode():
         outputs = model.generate(
             **inputs,
@@ -291,7 +297,10 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
         )
+    logger.info(f"[inference] Генерация модели завершена")
 
+    # Декодирование
+    logger.info(f"[inference] Декодирование результатов...")
     decoded = tokenizer.batch_decode(outputs, skip_special_tokens=True)
     predictions: List[int] = []
     for i, full_text in enumerate(decoded):

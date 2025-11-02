@@ -1,4 +1,5 @@
 import threading
+import logging
 from typing import Tuple
 
 import torch
@@ -10,6 +11,8 @@ from transformers import (
     AutoModel,
 )
 from peft import PeftModel
+
+logger = logging.getLogger(__name__)
 
 
 MODEL_NAME = "Qwen/Qwen2.5-VL-3B-Instruct"
@@ -73,6 +76,7 @@ def get_vl_model_and_processor() -> Tuple[Qwen2_5_VLForConditionalGeneration, Au
         if _vl_model is not None and _vl_processor is not None:
             return _vl_model, _vl_processor
 
+        logger.info("[models] Загрузка VL модели и процессора...")
         _vl_processor = AutoProcessor.from_pretrained(
             MODEL_NAME,
             use_fast=False,
@@ -83,6 +87,7 @@ def get_vl_model_and_processor() -> Tuple[Qwen2_5_VLForConditionalGeneration, Au
         _vl_model.eval()
         for p in _vl_model.parameters():
             p.requires_grad = False
+        logger.info("[models] VL модель загружена успешно")
 
     return _vl_model, _vl_processor
 
@@ -96,6 +101,7 @@ def get_text_model_and_tokenizer():
         if _text_model is not None and _text_tokenizer is not None:
             return _text_model, _text_tokenizer
 
+        logger.info("[models] Загрузка токенизатора и текстовой модели...")
         _text_tokenizer = AutoTokenizer.from_pretrained(
             MODEL_NAME,
             trust_remote_code=True,
@@ -105,6 +111,7 @@ def get_text_model_and_tokenizer():
         if _text_tokenizer.pad_token is None:
             _text_tokenizer.pad_token = _text_tokenizer.eos_token
 
+        logger.info("[models] Загрузка базовой модели...")
         try:
             if torch.cuda.is_available():
                 base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
@@ -117,7 +124,7 @@ def get_text_model_and_tokenizer():
             else:
                 raise RuntimeError("CUDA недоступна, используем fp16/32")
         except Exception as e:
-            print("[models] 4-bit загрузка базовой модели не удалась, fallback на fp16:", e)
+            logger.warning(f"[models] 4-bit загрузка базовой модели не удалась, fallback на fp16: {e}")
             base_model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
                 MODEL_NAME,
                 device_map="auto",
@@ -125,10 +132,12 @@ def get_text_model_and_tokenizer():
                 dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
             )
 
+        logger.info(f"[models] Загрузка LoRA адаптера из {ADAPTER_PATH}...")
         _text_model = PeftModel.from_pretrained(base_model, ADAPTER_PATH)
         _text_model.eval()
         for p in _text_model.parameters():
             p.requires_grad = False
+        logger.info("[models] Текстовая модель с LoRA загружена успешно")
 
     return _text_model, _text_tokenizer
 
@@ -142,11 +151,13 @@ def get_rubert_model_and_tokenizer():
         if _ru_model is not None and _ru_tokenizer is not None:
             return _ru_model, _ru_tokenizer
 
+        logger.info("[models] Загрузка RuBERT модели...")
         _ru_tokenizer = AutoTokenizer.from_pretrained("cointegrated/rubert-tiny2", trust_remote_code=True, use_fast=False)
         _ru_model = AutoModel.from_pretrained("cointegrated/rubert-tiny2", trust_remote_code=True)
         _ru_model.eval()
         for p in _ru_model.parameters():
             p.requires_grad = False
+        logger.info("[models] RuBERT модель загружена успешно")
 
     return _ru_model, _ru_tokenizer
 
