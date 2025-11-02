@@ -1,6 +1,26 @@
 {
   "history": [
     {
+      "id": "result-bbbbacef2e88",
+      "userId": 0,
+      "filename": "test.csv",
+      "uploadedAt": "2025-11-02T14:42:01.507766Z",
+      "status": "completed",
+      "totalRecords": 51,
+      "averageScore": 0.5490196078431373,
+      "resultsUrl": "/results/result-bbbbacef2e88"
+    },
+    {
+      "id": "result-6840b73a24ca",
+      "userId": 0,
+      "filename": "test.csv",
+      "uploadedAt": "2025-11-02T14:00:33.758346Z",
+      "status": "completed",
+      "totalRecords": 51,
+      "averageScore": 0.5490196078431373,
+      "resultsUrl": "/results/result-6840b73a24ca"
+    },
+    {
       "id": "result-6fa86aa0a31c",
       "userId": 0,
       "filename": "test.csv",
