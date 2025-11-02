@@ -82,6 +82,12 @@ def _generate_image_caption(model, processor, prefix_words: str, url: str) -> st
 
     outputs = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
     caption = processor.decode(outputs[0][inputs["input_ids"].shape[-1]:])
+    
+    # Освобождаем память от тензоров
+    del inputs, outputs
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    
     return caption
 
 
@@ -106,10 +112,22 @@ def _caption_images(unique_links: List[str]) -> List[str]:
         word = random.choice(replaces)
         caption = _generate_image_caption(model, processor, word, url)
         results.append(caption)
+        
+        # Периодическая очистка памяти каждые 5 изображений
+        if (idx + 1) % 5 == 0:
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
 
     elapsed = time.time() - start
     logger.info(f"[inference] Подписи к изображениям сгенерированы: {len(results)} за {elapsed:.1f} сек ({elapsed/len(unique_links):.1f} сек/изображение)")
-    torch.cuda.empty_cache()
+    
+    # Очистка памяти CUDA и сбор мусора
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+    logger.info("[inference] Память CUDA очищена после генерации подписей")
+    
     return results
 
 
@@ -132,6 +150,9 @@ def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
                     elapsed = time.time() - start
                     eta = (elapsed / processed * (total_with_images - processed)) if processed > 0 else 0
                     logger.info(f"[inference] Сжатие транскрибаций: {processed}/{total_with_images} ({elapsed:.1f} сек, ETA: {eta:.1f} сек)")
+                    # Периодическая очистка памяти каждые 5 записей
+                    if processed % 10 == 0 and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                 text_value = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""
                 messages = [
                     {
@@ -173,8 +194,11 @@ def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
         except Exception:
             continue
 
-    torch.cuda.empty_cache()
+    # Очистка памяти CUDA и сбор мусора после обработки транскрибаций
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
     gc.collect()
+    logger.info("[inference] Память CUDA очищена после сжатия транскрибаций")
 
 
 def _get_sentence_embedding(sentence: str) -> np.ndarray:
@@ -189,7 +213,10 @@ def _get_sentence_embedding(sentence: str) -> np.ndarray:
     with torch.no_grad():
         outputs = model(**encoded)
     embeddings = torch.mean(outputs.last_hidden_state, dim=1)
-    return embeddings[0].numpy()
+    result = embeddings[0].numpy()
+    # Освобождаем память от тензоров
+    del encoded, outputs, embeddings
+    return result
 
 
 def _semantic_similarity_russian(text1: str, text2: str) -> float:
@@ -218,12 +245,22 @@ def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], caption
                     speed = processed / elapsed if elapsed > 0 else 0
                     eta = (total_images - processed) / speed if speed > 0 else 0
                     logger.info(f"[inference] Вычисление схожести: {processed}/{total_images} ({elapsed:.1f} сек, {speed:.1f} зап/сек, ETA: {eta:.1f} сек)")
+                    # Периодическая очистка памяти каждые 50 записей
+                    if processed % 100 == 0 and torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                        gc.collect()
                 person_text = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""
                 llm_text = link_to_caption[link]
                 score = _semantic_similarity_russian(person_text, llm_text)
                 df.loc[i, "Схожесть описания картинки"] = score
         except Exception:
             continue
+    
+    # Очистка памяти CUDA и сбор мусора после вычисления схожести
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+    logger.info("[inference] Память CUDA очищена после вычисления семантической схожести")
 
 
 def _build_inference_prompt(row: pd.Series) -> str:
@@ -308,8 +345,16 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
         generated = full_text[len(prompt):].strip()
         score = _extract_score(generated, question_nums[i])
         predictions.append(score)
+    
+    # Освобождаем память от больших тензоров
+    del inputs, outputs, decoded
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+    gc.collect()
+    
     elapsed = time.time() - start
     logger.info(f"[inference] Предсказания завершены, средняя оценка: {np.mean(predictions):.2f} за {elapsed:.1f} сек ({len(prompts)/elapsed:.1f} предсказ/сек)")
+    logger.info("[inference] Память CUDA очищена после генерации оценок")
     return predictions
 
 
@@ -370,6 +415,14 @@ def run_inference(input_df: pd.DataFrame) -> pd.DataFrame:
     predictions = _predict_batch(prompts, qnums)
 
     df["Оценка экзаменатора"] = predictions
+    
+    # Финальная очистка памяти после завершения всего пайплайна
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        logger.info("[inference] Финальная очистка CUDA кеша")
+    gc.collect()
+    logger.info("[inference] Финальный сбор мусора выполнен")
+    
     elapsed = time.time() - start_time
     logger.info(f"[inference] ========== ИНФЕРЕНС ЗАВЕРШЕН: {len(df)} строк обработано за {elapsed:.1f} сек ==========")
     return df

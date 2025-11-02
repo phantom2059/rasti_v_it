@@ -1,11 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import FileUpload from '../components/FileUpload';
-import { uploadFileAPI, pollResultsAPI, getDownloadUrl } from '../services/api';
+import { uploadFileAPI, pollResultsAPI, getDownloadUrl, getResultsAPI } from '../services/api';
 import mlImageLight from '../../images/ml_light.png';
 import mlImageDark from '../../images/ml_dark.png';
 import backendImageLight from '../../images/back_light.png';
@@ -19,31 +19,64 @@ const MainPage = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [processingStatus, setProcessingStatus] = useState(''); // Для статуса обработки
   const [resultId, setResultId] = useState(null); // ID результата для скачивания
+  const pollingRef = useRef(null); // Референс для отслеживания активного поллинга
 
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
   const { theme } = useTheme();
 
+  // Очистка при размонтировании
+  useEffect(() => {
+    return () => {
+      if (pollingRef.current) {
+        console.log('[MainPage] Компонент размонтирован, поллинг должен быть остановлен');
+      }
+    };
+  }, []);
+
   const handleFileSelect = async (file) => {
+    // Останавливаем предыдущий поллинг, если есть
+    if (pollingRef.current) {
+      console.log('[MainPage] Останавливаем предыдущий поллинг');
+      pollingRef.current.aborted = true;
+      pollingRef.current = null;
+    }
+
     setIsProcessing(true);
     setUploadProgress(0);
     setProcessingStatus('Загрузка файла...');
     setResultId(null);
     
+    let currentResultId = null;
+    const pollingController = { aborted: false };
+    pollingRef.current = pollingController;
+    
     try {
+      console.log('[MainPage] Начало загрузки файла:', file.name);
       // Загрузка файла
       const result = await uploadFileAPI(file, (progress) => {
         setUploadProgress(Math.min(progress, 10)); // Загрузка файла - только первые 10%
         setProcessingStatus(`Загрузка файла: ${progress}%`);
       });
 
-      setResultId(result.id);
+      if (pollingController.aborted) {
+        console.log('[MainPage] Поллинг был прерван после загрузки');
+        return;
+      }
+
+      currentResultId = result.id;
+      console.log('[MainPage] Файл загружен, ID результата:', currentResultId);
+      setResultId(currentResultId);
       setProcessingStatus('Файл загружен, начинается обработка...');
       setUploadProgress(10);
 
       // Поллинг результата до завершения
-      const data = await pollResultsAPI(result.id, {
+      console.log('[MainPage] Начало поллинга результата:', currentResultId);
+      const data = await pollResultsAPI(currentResultId, {
+        intervalMs: 3000,
+        maxAttempts: 28800, // До 24 часов ожидания (28800 * 3 сек = 86400 сек = 24 часа)
         onProgress: (progress) => {
+          if (pollingController.aborted) return;
           setUploadProgress(progress);
           if (progress < 30) {
             setProcessingStatus('Нормализация данных...');
@@ -61,23 +94,95 @@ const MainPage = () => {
         }
       });
 
-      toast.success('Обработка завершена успешно!');
-      setUploadProgress(100);
-      setProcessingStatus('Обработка завершена!');
+      if (pollingController.aborted) {
+        console.log('[MainPage] Поллинг был прерван после завершения');
+        return;
+      }
+
+      console.log('[MainPage] Поллинг завершен успешно, результат готов, данные:', data);
+      
+      // КРИТИЧЕСКИ ВАЖНО: устанавливаем все флаги для показа кнопки скачивания
+      setResultId(currentResultId); // Сначала устанавливаем ID
+      setUploadProgress(100); // Затем прогресс 100%
+      setProcessingStatus('Обработка завершена!'); // И статус
+      setIsProcessing(false); // ОБЯЗАТЕЛЬНО останавливаем обработку, чтобы показалась кнопка!
+      pollingRef.current = null;
+      
+      console.log('[MainPage] Все флаги установлены: resultId=', currentResultId, 'progress=100, isProcessing=false');
+      toast.success('Обработка завершена успешно! Файл готов к скачиванию.');
 
     } catch (error) {
-      toast.error('Ошибка при обработке файла: ' + (error.message || 'Неизвестная ошибка'));
-      setProcessingStatus('Ошибка при обработке');
+      console.error('[MainPage] Ошибка обработки:', error);
+      pollingRef.current = null;
+      const errorMessage = error.message || 'Неизвестная ошибка';
+      
+      // Если у нас есть resultId, проверяем, может быть файл уже готов
+      if (currentResultId) {
+        try {
+          const checkResult = await getResultsAPI(currentResultId);
+          if (checkResult.status === 'completed') {
+            // Файл готов, несмотря на ошибку!
+            console.log('[MainPage] Файл готов после ошибки поллинга, устанавливаем флаги');
+            setResultId(currentResultId); // Сначала ID
+            setUploadProgress(100); // Затем прогресс
+            setProcessingStatus('Обработка завершена!'); // Статус
+            setIsProcessing(false); // ОБЯЗАТЕЛЬНО останавливаем обработку!
+            console.log('[MainPage] Все флаги установлены после проверки');
+            toast.success('Файл успешно обработан! Файл готов к скачиванию.');
+            return;
+          }
+        } catch (checkError) {
+          console.warn('Проверка статуса не удалась:', checkError);
+        }
+      }
+      
+      toast.error('Ошибка при обработке файла: ' + errorMessage);
+      setProcessingStatus(`Ошибка: ${errorMessage}`);
+      
+      // НЕ сбрасываем resultId полностью - оставляем на случай, если файл все-таки обработается
+      // Пользователь может попробовать скачать позже или обновить страницу
+      if (!currentResultId) {
+        setResultId(null);
+      }
       setIsProcessing(false);
-      setUploadProgress(0);
-      setResultId(null);
     }
   };
 
-  const handleDownload = () => {
-    if (resultId) {
+  const handleDownload = async () => {
+    if (!resultId) {
+      toast.error('ID результата не найден');
+      console.error('[MainPage] handleDownload: resultId отсутствует');
+      return;
+    }
+
+    try {
+      console.log('[MainPage] Начало скачивания файла, ID:', resultId);
+      
+      // Проверяем статус перед скачиванием
+      const checkResult = await getResultsAPI(resultId);
+      if (checkResult.status !== 'completed') {
+        toast.error('Файл еще не готов к скачиванию. Статус: ' + checkResult.status);
+        console.warn('[MainPage] Файл не готов, статус:', checkResult.status);
+        return;
+      }
+
+      // Скачиваем файл
       const url = getDownloadUrl(resultId);
-      window.open(url, '_blank');
+      console.log('[MainPage] Открытие URL для скачивания:', url);
+      
+      // Создаем временную ссылку для скачивания
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${resultId}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      console.log('[MainPage] Скачивание файла инициировано');
+      toast.success('Скачивание файла начато');
+    } catch (error) {
+      console.error('[MainPage] Ошибка при скачивании файла:', error);
+      toast.error('Ошибка при скачивании файла: ' + error.message);
     }
   };
 
@@ -330,27 +435,93 @@ const MainPage = () => {
                   animate={{ opacity: 1, y: 0 }}
                   className="mt-4"
                 >
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={handleDownload}
-                    className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white py-3 rounded-lg font-medium hover:from-green-700 hover:to-green-800 transition-all shadow-lg"
-                  >
-                    📥 Скачать обработанный файл
-                  </motion.button>
-                  <motion.button
-                    whileHover={{ scale: 1.02 }}
-                    whileTap={{ scale: 0.98 }}
-                    onClick={() => {
-                      setIsUploadModalVisible(false);
-                      setResultId(null);
-                      setUploadProgress(0);
-                      setProcessingStatus('');
-                    }}
-                    className="mt-2 w-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
-                  >
-                    Закрыть
-                  </motion.button>
+                  {uploadProgress === 100 ? (
+                    <>
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={handleDownload}
+                        className="w-full bg-gradient-to-r from-green-600 to-green-700 text-white py-3 rounded-lg font-medium hover:from-green-700 hover:to-green-800 transition-all shadow-lg"
+                      >
+                        📥 Скачать обработанный файл
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => {
+                          setIsUploadModalVisible(false);
+                          setResultId(null);
+                          setUploadProgress(0);
+                          setProcessingStatus('');
+                        }}
+                        className="mt-2 w-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+                      >
+                        Закрыть
+                      </motion.button>
+                    </>
+                  ) : (
+                    <>
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={async () => {
+                          // Проверяем статус еще раз
+                          try {
+                            const checkResult = await getResultsAPI(resultId);
+                            if (checkResult.status === 'completed') {
+                              setUploadProgress(100);
+                              setProcessingStatus('Обработка завершена!');
+                              handleDownload();
+                            } else {
+                              toast.error('Файл еще обрабатывается. Подождите...');
+                              setIsProcessing(true);
+                              // Продолжаем поллинг
+                              const data = await pollResultsAPI(resultId, {
+                                intervalMs: 3000,
+                                maxAttempts: 28800, // До 24 часов ожидания
+                                onProgress: (progress) => {
+                                  setUploadProgress(progress);
+                                  if (progress < 30) {
+                                    setProcessingStatus('Нормализация данных...');
+                                  } else if (progress < 50) {
+                                    setProcessingStatus('Генерация подписей к изображениям...');
+                                  } else if (progress < 70) {
+                                    setProcessingStatus('Обработка транскрибаций...');
+                                  } else if (progress < 90) {
+                                    setProcessingStatus('Вычисление семантической схожести...');
+                                  } else if (progress < 100) {
+                                    setProcessingStatus('Генерация оценок...');
+                                  } else {
+                                    setProcessingStatus('Обработка завершена!');
+                                  }
+                                }
+                              });
+                              setUploadProgress(100);
+                              setProcessingStatus('Обработка завершена!');
+                              setIsProcessing(false);
+                              handleDownload();
+                            }
+                          } catch (error) {
+                            toast.error('Не удалось проверить статус: ' + error.message);
+                          }
+                        }}
+                        className="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 rounded-lg font-medium hover:from-blue-700 hover:to-blue-800 transition-all shadow-lg"
+                      >
+                        🔄 Проверить статус и скачать
+                      </motion.button>
+                      <motion.button
+                        whileHover={{ scale: 1.02 }}
+                        whileTap={{ scale: 0.98 }}
+                        onClick={() => {
+                          setIsUploadModalVisible(false);
+                          // НЕ сбрасываем resultId - пользователь сможет вернуться
+                        }}
+                        className="mt-2 w-full bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors font-medium"
+                      >
+                        Закрыть (файл будет доступен позже)
+                      </motion.button>
+                    </>
+                  )}
                 </motion.div>
               )}
 

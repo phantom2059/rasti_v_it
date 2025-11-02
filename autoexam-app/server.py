@@ -271,19 +271,25 @@ def upload_options():
 
 @app.get(f"{API_PREFIX}/results/{{result_id}}", response_model=ResultResponse)
 def get_results(result_id: str):
+    logger.info(f"[server] GET /api/results/{result_id} - запрос статуса")
     job = jobs.get(result_id)
     if job is None:
+        logger.warning(f"[server] Результат {result_id} не найден")
         raise HTTPException(status_code=404, detail="Результат не найден")
+
+    logger.info(f"[server] Статус задачи {result_id}: {job.status}")
 
     if job.status in ("queued", "processing"):
         return ResultResponse(id=job.id, filename=job.filename, status=job.status, totalRecords=None,
                               averageScore=None, distribution=None, records=None)
 
     if job.status == "failed":
+        logger.error(f"[server] Задача {result_id} завершилась с ошибкой: {job.error}")
         raise HTTPException(status_code=500, detail=f"Обработка завершилась с ошибкой: {job.error}")
 
     # completed
     assert job.result_path and os.path.exists(job.result_path)
+    logger.info(f"[server] Задача {result_id} завершена, возвращаем результаты")
     with open(job.result_path, "r", encoding="utf-8") as f:
         payload = json.load(f)
     # Добавим ссылку на скачивание если CSV есть
@@ -299,12 +305,33 @@ def get_history():
 
 @app.get(f"{API_PREFIX}/results/{{result_id}}/download")
 def download_result(result_id: str):
+    logger.info(f"[server] GET /api/results/{result_id}/download - запрос на скачивание")
     job = jobs.get(result_id)
     if job is None:
+        logger.warning(f"[server] Результат {result_id} не найден для скачивания")
         raise HTTPException(status_code=404, detail="Результат не найден")
-    if job.status != "completed" or not job.csv_path or not os.path.exists(job.csv_path):
-        raise HTTPException(status_code=404, detail="CSV не готов")
-    return FileResponse(job.csv_path, media_type='text/csv', filename=f"{result_id}.csv")
+    
+    logger.info(f"[server] Статус задачи {result_id} для скачивания: {job.status}, csv_path: {job.csv_path}")
+    
+    if job.status != "completed":
+        logger.warning(f"[server] Задача {result_id} не завершена (статус: {job.status})")
+        raise HTTPException(status_code=404, detail=f"CSV не готов, статус: {job.status}")
+    
+    if not job.csv_path:
+        logger.error(f"[server] CSV путь не указан для задачи {result_id}")
+        raise HTTPException(status_code=404, detail="CSV путь не указан")
+    
+    if not os.path.exists(job.csv_path):
+        logger.error(f"[server] CSV файл не существует: {job.csv_path}")
+        raise HTTPException(status_code=404, detail="CSV файл не найден на сервере")
+    
+    logger.info(f"[server] Возвращаем CSV файл: {job.csv_path}")
+    return FileResponse(
+        job.csv_path, 
+        media_type='text/csv', 
+        filename=f"{result_id}.csv",
+        headers={"Content-Disposition": f"attachment; filename={result_id}.csv"}
+    )
 
 
 # Для локального запуска из директории autoexam-app:
