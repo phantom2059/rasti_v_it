@@ -31,7 +31,7 @@ ADAPTER_PATH = "qwen_sft_exam"
 
 MAX_SEQ_LENGTH = 512
 MAX_NEW_TOKENS = 512
-REQUEST_TIMEOUT = 50
+REQUEST_TIMEOUT = 3600
 
 
 def _filter_text(text: str) -> str:
@@ -85,10 +85,12 @@ def _generate_image_caption(model, processor, prefix_words: str, url: str) -> st
 
 
 def _caption_images(unique_links: List[str]) -> List[str]:
+    import time
     if len(unique_links) == 0:
         logger.info("[inference] Нет изображений для обработки")
         return []
     logger.info(f"[inference] Начинаем генерацию подписей к {len(unique_links)} изображениям")
+    start = time.time()
     model, processor = get_vl_model_and_processor()
     replaces = [
         "На картинке видна",
@@ -105,13 +107,15 @@ def _caption_images(unique_links: List[str]) -> List[str]:
         caption = _generate_image_caption(model, processor, word, url)
         results.append(caption)
 
-    logger.info(f"[inference] Подписи к изображениям сгенерированы: {len(results)}")
+    elapsed = time.time() - start
+    logger.info(f"[inference] Подписи к изображениям сгенерированы: {len(results)} за {elapsed:.1f} сек ({elapsed/len(unique_links):.1f} сек/изображение)")
     torch.cuda.empty_cache()
     return results
 
 
 def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
     # Преобразует поле "Транскрибация ответа" в краткое описание картинки для строк с Тип теста == 1
+    import time
     if "Тип теста" not in df.columns:
         return
     model, processor = get_vl_model_and_processor()
@@ -119,13 +123,16 @@ def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
     total_with_images = int(df["Тип теста"].sum()) if "Тип теста" in df.columns else 0
     logger.info(f"[inference] Обработка транскрибаций для {total_with_images} строк с изображениями")
     processed = 0
+    start = time.time()
 
     for i in range(len(df)):
         try:
             if int(df.loc[i, "Тип теста"]) == 1:
                 processed += 1
                 if processed % 5 == 0 or processed == total_with_images:
-                    logger.info(f"[inference] Сжатие транскрибаций: {processed}/{total_with_images}")
+                    elapsed = time.time() - start
+                    eta = (elapsed / processed * (total_with_images - processed)) if processed > 0 else 0
+                    logger.info(f"[inference] Сжатие транскрибаций: {processed}/{total_with_images} ({elapsed:.1f} сек, ETA: {eta:.1f} сек)")
                 text_value = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""
                 messages = [
                     {
@@ -194,12 +201,14 @@ def _semantic_similarity_russian(text1: str, text2: str) -> float:
 
 
 def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], captions: List[str]) -> None:
+    import time
     if "Схожесть описания картинки" not in df.columns:
         df["Схожесть описания картинки"] = 0.0
     link_to_caption = {link: captions[idx] for idx, link in enumerate(unique_links)}
     total_images = len([i for i in range(len(df)) if str(df.loc[i, "Картинка из вопроса"]) != "no image"])
     logger.info(f"[inference] Вычисление семантической схожести для {total_images} записей с изображениями")
     processed = 0
+    start = time.time()
     
     for i in range(len(df)):
         try:
@@ -207,7 +216,10 @@ def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], caption
             if link and link != "no image" and link in link_to_caption:
                 processed += 1
                 if processed % 50 == 0 or processed == total_images:
-                    logger.info(f"[inference] Вычисление схожести: {processed}/{total_images}")
+                    elapsed = time.time() - start
+                    speed = processed / elapsed if elapsed > 0 else 0
+                    eta = (total_images - processed) / speed if speed > 0 else 0
+                    logger.info(f"[inference] Вычисление схожести: {processed}/{total_images} ({elapsed:.1f} сек, {speed:.1f} зап/сек, ETA: {eta:.1f} сек)")
                 person_text = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""
                 llm_text = link_to_caption[link]
                 score = _semantic_similarity_russian(person_text, llm_text)
@@ -262,8 +274,10 @@ def _extract_score(text: str, question_num: int) -> int:
 
 
 def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
+    import time
     model, tokenizer = get_text_model_and_tokenizer()
     logger.info(f"[inference] Запуск батчевого предсказания для {len(prompts)} примеров")
+    start = time.time()
     inputs = tokenizer(
         prompts,
         return_tensors="pt",
@@ -288,7 +302,8 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
         generated = full_text[len(prompt):].strip()
         score = _extract_score(generated, question_nums[i])
         predictions.append(score)
-    logger.info(f"[inference] Предсказания завершены, средняя оценка: {np.mean(predictions):.2f}")
+    elapsed = time.time() - start
+    logger.info(f"[inference] Предсказания завершены, средняя оценка: {np.mean(predictions):.2f} за {elapsed:.1f} сек ({len(prompts)/elapsed:.1f} предсказ/сек)")
     return predictions
 
 
@@ -297,6 +312,8 @@ def run_inference(input_df: pd.DataFrame) -> pd.DataFrame:
     Основной пайплайн инференса. Возвращает DataFrame c добавленной колонкой
     "Оценка экзаменатора" и приведенными вспомогательными полями.
     """
+    import time
+    start_time = time.time()
     logger.info(f"[inference] ========== ЗАПУСК ИНФЕРЕНСА: {len(input_df)} строк ==========")
     df = input_df.copy()
 
@@ -348,7 +365,8 @@ def run_inference(input_df: pd.DataFrame) -> pd.DataFrame:
     predictions = _predict_batch(prompts, qnums)
 
     df["Оценка экзаменатора"] = predictions
-    logger.info(f"[inference] ========== ИНФЕРЕНС ЗАВЕРШЕН: {len(df)} строк обработано ==========")
+    elapsed = time.time() - start_time
+    logger.info(f"[inference] ========== ИНФЕРЕНС ЗАВЕРШЕН: {len(df)} строк обработано за {elapsed:.1f} сек ==========")
     return df
 
 
