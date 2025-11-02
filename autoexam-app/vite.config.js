@@ -6,6 +6,12 @@ export default defineConfig({
   server: {
     port: 5173,
     open: true, //открытие браузера при запуске
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     outDir: 'dist',

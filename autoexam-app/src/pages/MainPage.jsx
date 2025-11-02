@@ -5,7 +5,7 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import FileUpload from '../components/FileUpload';
-import { uploadFile } from '../services/api';
+import { uploadFileAPI, pollResultsAPI, getDownloadUrl } from '../services/api';
 import mlImageLight from '../../images/ml_light.png';
 import mlImageDark from '../../images/ml_dark.png';
 import backendImageLight from '../../images/back_light.png';
@@ -25,17 +25,22 @@ const MainPage = () => {
   const handleFileSelect = async (file) => {
     setIsProcessing(true);
     try {
-      const result = await uploadFile(file, (progress) => {
+      const result = await uploadFileAPI(file, (progress) => {
         setUploadProgress(progress);
       });
-      
-      toast.success('Файл успешно обработан!');
+
+      // Поллинг результата до завершения
+      const data = await pollResultsAPI(result.id);
+
+      // Автоскачивание CSV
+      const url = getDownloadUrl(result.id);
+      window.open(url, '_blank');
+
+      toast.success('Обработка завершена, скачивание началось');
       setIsProcessing(false);
       setIsUploadModalVisible(false);
       setUploadProgress(0);
-      
-      // В будущем перенаправим на страницу результатов
-      // navigate(`/results/${result.id}`);
+
     } catch (error) {
       toast.error('Ошибка при обработке файла');
       setIsProcessing(false);

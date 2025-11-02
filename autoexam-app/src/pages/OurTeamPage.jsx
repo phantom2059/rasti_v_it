@@ -85,7 +85,7 @@ const OurTeamPage = () => {
               </div>
               <div className="p-6">
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">Сергей Катцын</h2>
-                <p className="text-gray-600 dark:text-gray-400">ML Engineer & Fullstack Developer</p>
+                <p className="text-gray-600 dark:text-gray-400">ML Engineer & Backend Developer</p>
               </div>
             </motion.div>
 
@@ -105,7 +105,7 @@ const OurTeamPage = () => {
               </div>
               <div className="p-6">
                 <h2 className="text-2xl font-bold text-gray-800 dark:text-gray-100 mb-2">Кирилл Маханьков</h2>
-                <p className="text-gray-600 dark:text-gray-400">ML Engineer & UI/UX Designer</p>
+                <p className="text-gray-600 dark:text-gray-400">Frontend Developer & UI/UX Designer</p>
               </div>
             </motion.div>
           </div>

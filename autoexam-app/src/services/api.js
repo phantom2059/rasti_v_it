@@ -1,7 +1,7 @@
 import axios from 'axios';
 
-// Base URL для API (в будущем заменить на реальный)
-const BASE_URL = 'http://localhost:8000/api';
+// Base URL для API: используем относительный путь и прокси Vite
+const BASE_URL = '/api';
 
 // Создаем axios instance
 const apiClient = axios.create({
@@ -81,7 +81,7 @@ export const getHistory = async (userId) => {
 };
 
 // Реальный API запрос (когда бэк будет готов)
-export const uploadFileAPI = async (file) => {
+export const uploadFileAPI = async (file, onProgress) => {
   const formData = new FormData();
   formData.append('file', file);
 
@@ -89,6 +89,11 @@ export const uploadFileAPI = async (file) => {
     const response = await apiClient.post('/upload', formData, {
       headers: {
         'Content-Type': 'multipart/form-data',
+      },
+      onUploadProgress: (progressEvent) => {
+        if (!onProgress || !progressEvent.total) return;
+        const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
+        onProgress(percent);
       },
     });
     return response.data;
@@ -117,6 +122,20 @@ export const getHistoryAPI = async () => {
     throw error;
   }
 };
+
+export const pollResultsAPI = async (id, { intervalMs = 2000, maxAttempts = 360 } = {}) => {
+  let attempts = 0;
+  while (attempts < maxAttempts) {
+    const data = await getResultsAPI(id);
+    if (data.status === 'completed') return data;
+    if (data.status === 'failed') throw new Error('Обработка завершилась с ошибкой');
+    await new Promise((r) => setTimeout(r, intervalMs));
+    attempts += 1;
+  }
+  throw new Error('Таймаут ожидания результата');
+};
+
+export const getDownloadUrl = (id) => `${BASE_URL}/results/${id}/download`;
 
 export default apiClient;
 

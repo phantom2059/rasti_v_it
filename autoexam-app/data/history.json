@@ -1,6 +1,16 @@
 {
   "history": [
     {
+      "id": "result-6fa86aa0a31c",
+      "userId": 0,
+      "filename": "test.csv",
+      "uploadedAt": "2025-11-02T12:44:15.346706Z",
+      "status": "completed",
+      "totalRecords": 51,
+      "averageScore": 1.3137254901960784,
+      "resultsUrl": "/results/result-6fa86aa0a31c"
+    },
+    {
       "id": "sample-001",
       "userId": 1,
       "filename": "exam_sample.csv",
@@ -12,4 +22,3 @@
     }
   ]
 }
-

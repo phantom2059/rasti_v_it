@@ -1,0 +1,13 @@
+transformers
+accelerate
+# torch и torchvision — устанавливать вручную с CUDA: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu124
+tokenizers
+qwen-vl-utils
+bitsandbytes
+fastapi
+uvicorn[standard]
+python-multipart
+scikit-learn
+pydantic
+peft
+requests
