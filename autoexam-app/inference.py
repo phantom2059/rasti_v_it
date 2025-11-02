@@ -118,15 +118,18 @@ def _caption_images(unique_links: List[str]) -> List[str]:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
+            logger.debug(f"[inference] Периодическая очистка памяти после {idx + 1} изображений")
 
     elapsed = time.time() - start
     logger.info(f"[inference] Подписи к изображениям сгенерированы: {len(results)} за {elapsed:.1f} сек ({elapsed/len(unique_links):.1f} сек/изображение)")
     
-    # Очистка памяти CUDA и сбор мусора
+    # Агрессивная очистка памяти CUDA после завершения цикла
+    # Очищаем ссылки на модель и процессор (они глобальные, но освобождаем локальные ссылки)
+    del model, processor
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
-    logger.info("[inference] Память CUDA очищена после генерации подписей")
+    logger.info("[inference] Память CUDA очищена после генерации подписей, модель и процессор освобождены")
     
     return results
 
@@ -191,14 +194,19 @@ def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
                 res = processor.decode(generated_ids, skip_special_tokens=True)
                 if "Транскрибация ответа" in df.columns:
                     df.loc[i, "Транскрибация ответа"] = res
+                
+                # Освобождаем память от тензоров после каждой обработки
+                del inputs, outputs, generated_ids
         except Exception:
             continue
 
-    # Очистка памяти CUDA и сбор мусора после обработки транскрибаций
+    # Агрессивная очистка памяти CUDA после завершения цикла обработки транскрибаций
+    # Очищаем ссылки на модель и процессор
+    del model, processor
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
-    logger.info("[inference] Память CUDA очищена после сжатия транскрибаций")
+    logger.info("[inference] Память CUDA очищена после сжатия транскрибаций, модель и процессор освобождены")
 
 
 def _get_sentence_embedding(sentence: str) -> np.ndarray:
@@ -214,8 +222,9 @@ def _get_sentence_embedding(sentence: str) -> np.ndarray:
         outputs = model(**encoded)
     embeddings = torch.mean(outputs.last_hidden_state, dim=1)
     result = embeddings[0].numpy()
-    # Освобождаем память от тензоров
+    # Освобождаем память от тензоров сразу после использования
     del encoded, outputs, embeddings
+    # Не удаляем model и tokenizer - они глобальные и используются повторно
     return result
 
 
@@ -245,10 +254,11 @@ def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], caption
                     speed = processed / elapsed if elapsed > 0 else 0
                     eta = (total_images - processed) / speed if speed > 0 else 0
                     logger.info(f"[inference] Вычисление схожести: {processed}/{total_images} ({elapsed:.1f} сек, {speed:.1f} зап/сек, ETA: {eta:.1f} сек)")
-                    # Периодическая очистка памяти каждые 50 записей
+                    # Периодическая очистка памяти каждые 100 записей
                     if processed % 100 == 0 and torch.cuda.is_available():
                         torch.cuda.empty_cache()
                         gc.collect()
+                        logger.debug(f"[inference] Периодическая очистка памяти после {processed} записей схожести")
                 person_text = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""
                 llm_text = link_to_caption[link]
                 score = _semantic_similarity_russian(person_text, llm_text)
@@ -256,7 +266,8 @@ def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], caption
         except Exception:
             continue
     
-    # Очистка памяти CUDA и сбор мусора после вычисления схожести
+    # Агрессивная очистка памяти CUDA после завершения цикла вычисления схожести
+    # Модель ruBERT глобальная, но очищаем кеш GPU
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
@@ -346,15 +357,17 @@ def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
         score = _extract_score(generated, question_nums[i])
         predictions.append(score)
     
-    # Освобождаем память от больших тензоров
+    # Агрессивная очистка памяти от всех больших тензоров
     del inputs, outputs, decoded
+    # Освобождаем ссылки на модель и токенизатор (они глобальные, но локальные ссылки удаляем)
+    del model, tokenizer
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
     gc.collect()
     
     elapsed = time.time() - start
     logger.info(f"[inference] Предсказания завершены, средняя оценка: {np.mean(predictions):.2f} за {elapsed:.1f} сек ({len(prompts)/elapsed:.1f} предсказ/сек)")
-    logger.info("[inference] Память CUDA очищена после генерации оценок")
+    logger.info("[inference] Память CUDA очищена после генерации оценок, модель и токенизатор освобождены")
     return predictions
 
 
