@@ -3,6 +3,7 @@ import re
 import gc
 import random
 import logging
+import time
 from typing import Tuple, List
 
 import numpy as np
@@ -85,7 +86,6 @@ def _generate_image_caption(model, processor, prefix_words: str, url: str) -> st
 
 
 def _caption_images(unique_links: List[str]) -> List[str]:
-    import time
     if len(unique_links) == 0:
         logger.info("[inference] Нет изображений для обработки")
         return []
@@ -115,7 +115,6 @@ def _caption_images(unique_links: List[str]) -> List[str]:
 
 def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
     # Преобразует поле "Транскрибация ответа" в краткое описание картинки для строк с Тип теста == 1
-    import time
     if "Тип теста" not in df.columns:
         return
     model, processor = get_vl_model_and_processor()
@@ -201,7 +200,6 @@ def _semantic_similarity_russian(text1: str, text2: str) -> float:
 
 
 def _compute_image_similarity(df: pd.DataFrame, unique_links: List[str], captions: List[str]) -> None:
-    import time
     if "Схожесть описания картинки" not in df.columns:
         df["Схожесть описания картинки"] = 0.0
     link_to_caption = {link: captions[idx] for idx, link in enumerate(unique_links)}
@@ -274,7 +272,6 @@ def _extract_score(text: str, question_num: int) -> int:
 
 
 def _predict_batch(prompts: List[str], question_nums: List[int]) -> List[int]:
-    import time
     model, tokenizer = get_text_model_and_tokenizer()
     logger.info(f"[inference] Запуск батчевого предсказания для {len(prompts)} примеров")
     start = time.time()
@@ -312,7 +309,6 @@ def run_inference(input_df: pd.DataFrame) -> pd.DataFrame:
     Основной пайплайн инференса. Возвращает DataFrame c добавленной колонкой
     "Оценка экзаменатора" и приведенными вспомогательными полями.
     """
-    import time
     start_time = time.time()
     logger.info(f"[inference] ========== ЗАПУСК ИНФЕРЕНСА: {len(input_df)} строк ==========")
     df = input_df.copy()
