@@ -11,8 +11,12 @@ COPY package*.json ./
 # Устанавливаем зависимости
 RUN npm ci
 
-# Копируем исходники фронтенда
-COPY . .
+# Копируем конфигурационные файлы фронтенда
+COPY index.html .
+COPY vite.config.js .
+COPY tailwind.config.js .
+COPY postcss.config.js .
+COPY src ./src
 
 # Собираем фронтенд
 RUN npm run build
@@ -71,6 +75,9 @@ COPY inference.py .
 COPY models.py .
 COPY main.py .
 
+# Устанавливаем python3 как python (для совместимости)
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
 # Копируем ML модели и адаптеры
 COPY qwen_sft_exam ./qwen_sft_exam
 
@@ -90,5 +97,5 @@ ENV CUDA_VISIBLE_DEVICES=0
 EXPOSE 8000
 
 # Команда запуска
-CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
 
