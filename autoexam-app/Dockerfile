@@ -3,7 +3,7 @@
 # Этап 1: Сборка фронтенда
 FROM node:18-alpine AS frontend-builder
 
-WORKDIR /app/frontend
+WORKDIR /autoexam-app/frontend
 
 # Копируем package.json и package-lock.json
 COPY package*.json ./
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
 # Устанавливаем pip
 RUN python3.11 -m pip install --upgrade pip
 
-WORKDIR /app
+WORKDIR /autoexam-app
 
 # Копируем requirements.txt
 COPY requirements.txt .
@@ -59,7 +59,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN python3.11 -m pip install --upgrade pip
 
-WORKDIR /app
+WORKDIR /autoexam-app
 
 # Копируем Python зависимости из предыдущего этапа
 COPY --from=python-base /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
@@ -90,12 +90,12 @@ RUN mkdir -p storage/uploads storage/results
 
 # Устанавливаем переменные окружения
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8000
+ENV PORT=80
 ENV CUDA_VISIBLE_DEVICES=0
 
 # Открываем порт
-EXPOSE 8000
+EXPOSE 80
 
 # Команда запуска
-CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]
 
