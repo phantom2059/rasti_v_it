@@ -1,0 +1,64 @@
+# Node modules
+node_modules
+npm-debug.log
+# package-lock.json нужен для npm ci, поэтому не исключаем
+
+# Python cache
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Git
+.git
+.gitignore
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Storage (загружаемые файлы не нужны в образе)
+storage/uploads/*
+storage/results/*
+!storage/uploads/.gitkeep
+!storage/results/.gitkeep
+
+# Build artifacts
+dist
+*.zip
+*.tar.gz
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Test files
+test.csv
+*.test.*
+
+# Documentation
+README.md
+*.md
+!README.md
+
+# Deployment files
+DEPLOYMENT_GUIDE.md
+QUICK_START.md
+

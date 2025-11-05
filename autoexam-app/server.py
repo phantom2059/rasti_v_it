@@ -10,6 +10,8 @@ from typing import Dict, Any
 import pandas as pd
 from fastapi import FastAPI, UploadFile, File, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse as FastAPIFileResponse
 from starlette.responses import Response
 from pydantic import BaseModel
 from fastapi.responses import FileResponse
@@ -28,6 +30,7 @@ UPLOADS_DIR = os.path.join(STORAGE_DIR, "uploads")
 RESULTS_DIR = os.path.join(STORAGE_DIR, "results")
 DATA_DIR = os.path.join(ROOT_DIR, "data")
 HISTORY_PATH = os.path.join(DATA_DIR, "history.json")
+DIST_DIR = os.path.join(ROOT_DIR, "dist")
 
 os.makedirs(UPLOADS_DIR, exist_ok=True)
 os.makedirs(RESULTS_DIR, exist_ok=True)
@@ -332,6 +335,25 @@ def download_result(result_id: str):
         filename=f"{result_id}.csv",
         headers={"Content-Disposition": f"attachment; filename={result_id}.csv"}
     )
+
+
+# Раздача статики фронтенда (если директория dist существует)
+if os.path.exists(DIST_DIR):
+    app.mount("/assets", StaticFiles(directory=os.path.join(DIST_DIR, "assets")), name="assets")
+    
+    @app.get("/{full_path:path}")
+    async def serve_frontend(full_path: str):
+        """Раздает фронтенд для всех путей, кроме /api"""
+        if full_path.startswith("api"):
+            return {"error": "Not found"}
+        file_path = os.path.join(DIST_DIR, full_path)
+        if os.path.exists(file_path) and os.path.isfile(file_path):
+            return FastAPIFileResponse(file_path)
+        # Для SPA - возвращаем index.html для всех остальных путей
+        index_path = os.path.join(DIST_DIR, "index.html")
+        if os.path.exists(index_path):
+            return FastAPIFileResponse(index_path)
+        return {"error": "Frontend not found"}
 
 
 # Для локального запуска из директории autoexam-app:

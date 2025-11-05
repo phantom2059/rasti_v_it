@@ -1,0 +1,94 @@
+# Многоэтапная сборка Docker образа для AutoExam с GPU поддержкой
+
+# Этап 1: Сборка фронтенда
+FROM node:18-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+
+# Копируем package.json и package-lock.json
+COPY package*.json ./
+
+# Устанавливаем зависимости
+RUN npm ci
+
+# Копируем исходники фронтенда
+COPY . .
+
+# Собираем фронтенд
+RUN npm run build
+
+# Этап 2: Python окружение с ML моделями и CUDA
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04 AS python-base
+
+# Устанавливаем системные зависимости
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Устанавливаем pip
+RUN python3.11 -m pip install --upgrade pip
+
+WORKDIR /app
+
+# Копируем requirements.txt
+COPY requirements.txt .
+
+# Устанавливаем PyTorch с CUDA поддержкой
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Устанавливаем остальные зависимости
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Этап 3: Финальный образ
+FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
+
+# Устанавливаем Python
+RUN apt-get update && apt-get install -y \
+    python3.11 \
+    python3.11-dev \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3.11 -m pip install --upgrade pip
+
+WORKDIR /app
+
+# Копируем Python зависимости из предыдущего этапа
+COPY --from=python-base /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
+COPY --from=python-base /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
+COPY --from=python-base /usr/local/bin /usr/local/bin
+
+# Копируем собранный фронтенд
+COPY --from=frontend-builder /app/frontend/dist ./dist
+
+# Копируем Python код
+COPY server.py .
+COPY inference.py .
+COPY models.py .
+COPY main.py .
+
+# Копируем ML модели и адаптеры
+COPY qwen_sft_exam ./qwen_sft_exam
+
+# Копируем данные и изображения
+COPY data ./data
+COPY images ./images
+
+# Создаем директории для хранения
+RUN mkdir -p storage/uploads storage/results
+
+# Устанавливаем переменные окружения
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8000
+ENV CUDA_VISIBLE_DEVICES=0
+
+# Открываем порт
+EXPOSE 8000
+
+# Команда запуска
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]
+

@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  autoexam:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: autoexam-app
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+    volumes:
+      # Монтируем storage для сохранения данных между перезапусками
+      - ./storage:/app/storage
+      - ./data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('http://localhost:8000/api/history', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
