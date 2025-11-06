@@ -3,7 +3,7 @@
 # Этап 1: Сборка фронтенда
 FROM node:18-alpine AS frontend-builder
 
-WORKDIR /autoexam-app/frontend
+WORKDIR /app/frontend
 
 # Копируем package.json и package-lock.json
 COPY package*.json ./
@@ -36,7 +36,7 @@ RUN apt-get update && apt-get install -y \
 # Устанавливаем pip
 RUN python3.11 -m pip install --upgrade pip
 
-WORKDIR /autoexam-app
+WORKDIR /app
 
 # Копируем requirements.txt
 COPY requirements.txt .
@@ -59,7 +59,7 @@ RUN apt-get update && apt-get install -y \
 
 RUN python3.11 -m pip install --upgrade pip
 
-WORKDIR /autoexam-app
+WORKDIR /app
 
 # Копируем Python зависимости из предыдущего этапа
 COPY --from=python-base /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
