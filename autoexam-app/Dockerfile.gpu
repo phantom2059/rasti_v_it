@@ -18,6 +18,7 @@ COPY tailwind.config.js .
 COPY postcss.config.js .
 COPY src ./src
 
+# Копируем данные и изображения (важно для работы)
 COPY data ./data
 COPY images ./images
 
@@ -34,6 +35,8 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     build-essential \
     git \
+    libgl1 \
+    libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем pip
@@ -47,7 +50,7 @@ COPY requirements.txt .
 # Устанавливаем PyTorch с CUDA поддержкой
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118  
 
-# Устанавливаем остальные зависимости
+# Устанавливаем остальные зависимости (включая fastapi и uvicorn)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Этап 3: Финальный образ
@@ -58,21 +61,19 @@ RUN apt-get update && apt-get install -y \
     python3.11 \
     python3.11-dev \
     python3-pip \
+    libgl1 \
+    libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3.11 -m pip install --upgrade pip
 
 WORKDIR /autoexam-app
 
-# Копируем Python зависимости из предыдущего этапа
-COPY --from=python-base /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-
-# Копируем собранный фронтенд
+# Копируем ВСЕ файлы проекта (включая зависимости)
 COPY --from=frontend-builder /autoexam-app/dist ./dist
-
-# Копируем данные и изображения
 COPY --from=frontend-builder /autoexam-app/data ./data
 COPY --from=frontend-builder /autoexam-app/images ./images
+COPY --from=frontend-builder /autoexam-app/qwen_sft_exam ./qwen_sft_exam
 
 # Копируем Python код
 COPY server.py .
@@ -80,8 +81,9 @@ COPY inference.py .
 COPY models.py .
 COPY main.py .
 
-# Копируем ML модели и адаптеры
-COPY qwen_sft_exam ./qwen_sft_exam
+# Копируем требования и устанавливаем зависимости в финальном образе
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Создаем директории для хранения
 RUN mkdir -p storage/uploads storage/results
