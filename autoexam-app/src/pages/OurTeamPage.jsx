@@ -2,8 +2,8 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import sergeyImage from '../../images/phantom.jpg';
-import kirillImage from '../../images/kirill.jpg';
+import sergeyImage from '/autoexam-app/images/phantom.jpg';
+import kirillImage from '/autoexam-app/images/kirill.jpg';
 
 const OurTeamPage = () => {
   const navigate = useNavigate();
