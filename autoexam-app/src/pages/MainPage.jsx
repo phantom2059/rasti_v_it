@@ -6,12 +6,12 @@ import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import FileUpload from '../components/FileUpload';
 import { uploadFileAPI, pollResultsAPI, getDownloadUrl, getResultsAPI } from '../services/api';
-import mlImageLight from '../../images/ml_light.png';
-import mlImageDark from '../../images/ml_dark.png';
-import backendImageLight from '../../images/back_light.png';
-import backendImageDark from '../../images/back_dark.png';
-import frontendImageLight from '../../images/front_light.png';
-import frontendImageDark from '../../images/front_dark.png';
+import mlImageLight from '/autoexam-app/images/ml_light.png';
+import mlImageDark from '/autoexam-app/images/ml_dark.png';
+import backendImageLight from '/autoexam-app/images/back_light.png';
+import backendImageDark from '/autoexam-app/images/back_dark.png';
+import frontendImageLight from '/autoexam-app/images/front_light.png';
+import frontendImageDark from '/autoexam-app/images/front_dark.png';
 
 const MainPage = () => {
   const [isUploadModalVisible, setIsUploadModalVisible] = useState(false);
