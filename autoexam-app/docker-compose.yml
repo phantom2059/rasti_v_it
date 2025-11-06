@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.gpu
-    container_name: autoexam-app
+    container_name: rasti-ai-service
     deploy:
       resources:
         reservations:
