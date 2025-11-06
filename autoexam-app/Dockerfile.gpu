@@ -92,6 +92,9 @@ RUN mkdir -p storage/uploads storage/results
 # Устанавливаем python3 как python (для совместимости)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
+# После установки зависимостей
+RUN pip install --no-cache-dir uvicorn fastapi
+
 # Устанавливаем переменные окружения
 ENV PYTHONUNBUFFERED=1
 ENV PORT=80
