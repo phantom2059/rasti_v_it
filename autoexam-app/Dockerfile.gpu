@@ -45,7 +45,7 @@ WORKDIR /autoexam-app
 COPY requirements.txt .
 
 # Устанавливаем PyTorch с CUDA поддержкой
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118  
 
 # Устанавливаем остальные зависимости
 RUN pip install --no-cache-dir -r requirements.txt
@@ -66,11 +66,13 @@ WORKDIR /autoexam-app
 
 # Копируем Python зависимости из предыдущего этапа
 COPY --from=python-base /usr/local/lib/python3.11/dist-packages /usr/local/lib/python3.11/dist-packages
-COPY --from=python-base /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=python-base /usr/local/bin /usr/local/bin
 
 # Копируем собранный фронтенд
 COPY --from=frontend-builder /autoexam-app/dist ./dist
+
+# Копируем данные и изображения
+COPY --from=frontend-builder /autoexam-app/data ./data
+COPY --from=frontend-builder /autoexam-app/images ./images
 
 # Копируем Python код
 COPY server.py .
@@ -78,16 +80,14 @@ COPY inference.py .
 COPY models.py .
 COPY main.py .
 
-# Устанавливаем python3 как python (для совместимости)
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
 # Копируем ML модели и адаптеры
 COPY qwen_sft_exam ./qwen_sft_exam
 
-# Копируем данные и изображения
-
 # Создаем директории для хранения
 RUN mkdir -p storage/uploads storage/results
+
+# Устанавливаем python3 как python (для совместимости)
+RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 
 # Устанавливаем переменные окружения
 ENV PYTHONUNBUFFERED=1
@@ -99,4 +99,3 @@ EXPOSE 80
 
 # Команда запуска
 CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]
-
