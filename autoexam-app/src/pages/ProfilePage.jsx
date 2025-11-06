@@ -6,8 +6,8 @@ import toast from 'react-hot-toast';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import ThemeToggle from '../components/ThemeToggle';
-import historyData from '../../data/history.json';
-import avatarImage from '../../images/avatar.png';
+import historyData from '/autoexam-app/data/history.json';
+import avatarImage from '/autoexam-app/images/avatar.png';
 
 const ProfilePage = () => {
   const { user, logout } = useAuth();
