@@ -73,7 +73,8 @@ WORKDIR /autoexam-app
 COPY --from=frontend-builder /autoexam-app/dist ./dist
 COPY --from=frontend-builder /autoexam-app/data ./data
 COPY --from=frontend-builder /autoexam-app/images ./images
-COPY --from=frontend-builder /autoexam-app/qwen_sft_exam ./qwen_sft_exam
+
+COPY qwen_sft_exam ./qwen_sft_exam
 
 # Копируем Python код
 COPY server.py .
