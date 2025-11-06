@@ -107,4 +107,4 @@ ENV CUDA_VISIBLE_DEVICES=0
 EXPOSE 80
 
 # Команда запуска
-CMD python3 -m uvicorn server:autoexam-app --host 0.0.0.0 --port, 80
+CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]
