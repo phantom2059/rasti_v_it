@@ -48,7 +48,7 @@ WORKDIR /autoexam-app
 COPY requirements.txt .
 
 # Устанавливаем PyTorch с CUDA поддержкой
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118  
+RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118    
 
 # Устанавливаем остальные зависимости (включая fastapi и uvicorn)
 RUN pip install --no-cache-dir -r requirements.txt
@@ -63,14 +63,15 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     libgl1 \
     libsm6 \
-    && rm -rf /var/lib/apt/lists/*
+    ufw && \
+    rm -rf /var/lib/apt/lists/*
 
 # Устанавливаем pip
 RUN python3.11 -m pip install --upgrade pip
 
 WORKDIR /autoexam-app
 
-# Копируем requirements.txt и проверяем его содержимое
+# Копируем требования и проверяем его содержимое
 COPY requirements.txt ./
 RUN echo "===== Требуемые зависимости =====" && \
     cat requirements.txt && \
@@ -106,5 +107,5 @@ ENV CUDA_VISIBLE_DEVICES=0
 # Открываем порт
 EXPOSE 80
 
-# Команда запуска
+# Команда запуска (ИСПРАВЛЕННАЯ ВЕРСИЯ)
 CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]
