@@ -3,7 +3,7 @@
 # Этап 1: Сборка фронтенда
 FROM node:18-alpine AS frontend-builder
 
-WORKDIR /autoexam-app/frontend
+WORKDIR /autoexam-app
 
 # Копируем package.json и package-lock.json
 COPY package*.json ./
