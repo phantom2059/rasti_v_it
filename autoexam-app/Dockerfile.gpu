@@ -18,6 +18,9 @@ COPY tailwind.config.js .
 COPY postcss.config.js .
 COPY src ./src
 
+COPY data ./data
+COPY images ./images
+
 # Собираем фронтенд
 RUN npm run build
 
@@ -67,7 +70,7 @@ COPY --from=python-base /usr/local/lib/python3.11/site-packages /usr/local/lib/p
 COPY --from=python-base /usr/local/bin /usr/local/bin
 
 # Копируем собранный фронтенд
-COPY --from=frontend-builder /app/frontend/dist ./dist
+COPY --from=frontend-builder /autoexam-app/dist ./dist
 
 # Копируем Python код
 COPY server.py .
@@ -82,8 +85,6 @@ RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
 COPY qwen_sft_exam ./qwen_sft_exam
 
 # Копируем данные и изображения
-COPY data ./data
-COPY images ./images
 
 # Создаем директории для хранения
 RUN mkdir -p storage/uploads storage/results
