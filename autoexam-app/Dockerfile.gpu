@@ -73,12 +73,21 @@ WORKDIR /autoexam-app
 
 # Копируем требования и проверяем его содержимое
 COPY requirements.txt ./
+
+# Устанавливаем PyTorch с CUDA поддержкой ПЕРЕД остальными зависимостями
+RUN echo "===== Установка PyTorch с CUDA =====" && \
+    python3.11 -m pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118
+
+# Устанавливаем остальные зависимости
 RUN echo "===== Требуемые зависимости =====" && \
     cat requirements.txt && \
     echo "===== Установка зависимостей =====" && \
-    pip install --no-cache-dir -r requirements.txt && \
+    python3.11 -m pip install --no-cache-dir -r requirements.txt && \
+    echo "===== Проверка установки uvicorn =====" && \
+    python3.11 -m pip show uvicorn && \
+    python3.11 -c "import uvicorn; print('uvicorn импортирован успешно')" && \
     echo "===== Установленные пакеты =====" && \
-    pip list
+    python3.11 -m pip list
 
 # Копируем ВСЕ файлы проекта
 COPY --from=frontend-builder /autoexam-app/dist ./dist
@@ -108,4 +117,4 @@ ENV CUDA_VISIBLE_DEVICES=0
 EXPOSE 80
 
 # Команда запуска (ИСПРАВЛЕННАЯ ВЕРСИЯ)
-CMD ["python3", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]
+CMD ["python3.11", "-m", "uvicorn", "server:app", "--host", "0.0.0.0", "--port", "80"]

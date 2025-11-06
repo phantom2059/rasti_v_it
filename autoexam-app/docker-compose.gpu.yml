@@ -20,11 +20,11 @@ services:
       - CUDA_VISIBLE_DEVICES=0
     volumes:
       # Монтируем storage для сохранения данных между перезапусками
-      - ./storage:/app/storage
-      - ./data:/app/data
+      - ./storage:/autoexam-app/storage
+      - ./data:/autoexam-app/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/api/history', timeout=5)"]
+      test: ["CMD", "python3.11", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:80/api/history', timeout=5)"]
       interval: 30s
       timeout: 10s
       retries: 3
