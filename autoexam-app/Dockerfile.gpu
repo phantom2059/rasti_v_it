@@ -56,7 +56,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Этап 3: Финальный образ
 FROM nvidia/cuda:11.8.0-cudnn8-runtime-ubuntu22.04
 
-# Устанавливаем Python
+# Устанавливаем системные зависимости
 RUN apt-get update && apt-get install -y \
     python3.11 \
     python3.11-dev \
@@ -65,11 +65,21 @@ RUN apt-get update && apt-get install -y \
     libsm6 \
     && rm -rf /var/lib/apt/lists/*
 
+# Устанавливаем pip
 RUN python3.11 -m pip install --upgrade pip
 
 WORKDIR /autoexam-app
 
-# Копируем ВСЕ файлы проекта (включая зависимости)
+# Копируем requirements.txt и проверяем его содержимое
+COPY requirements.txt ./
+RUN echo "===== Требуемые зависимости =====" && \
+    cat requirements.txt && \
+    echo "===== Установка зависимостей =====" && \
+    pip install --no-cache-dir -r requirements.txt && \
+    echo "===== Установленные пакеты =====" && \
+    pip list
+
+# Копируем ВСЕ файлы проекта
 COPY --from=frontend-builder /autoexam-app/dist ./dist
 COPY --from=frontend-builder /autoexam-app/data ./data
 COPY --from=frontend-builder /autoexam-app/images ./images
@@ -82,18 +92,11 @@ COPY inference.py .
 COPY models.py .
 COPY main.py .
 
-# Копируем требования и устанавливаем зависимости в финальном образе
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
 # Создаем директории для хранения
 RUN mkdir -p storage/uploads storage/results
 
 # Устанавливаем python3 как python (для совместимости)
 RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
-
-# После установки зависимостей
-RUN pip install --no-cache-dir uvicorn fastapi
 
 # Устанавливаем переменные окружения
 ENV PYTHONUNBUFFERED=1
