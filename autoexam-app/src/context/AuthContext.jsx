@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import usersData from '../../../data/users.json';
+import usersData from '/autoexam-app/data/users.json';
 
 const AuthContext = createContext();
 
