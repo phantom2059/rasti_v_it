@@ -158,32 +158,36 @@ def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
         "score2": int((df[score_col] == 2).sum()),
     }
 
-    # Обработка больших данных батчами для предотвращения проблем с памятью
-    records = []
-    batch_size = 10  # Обрабатываем по 10 записей за раз
+    # Для больших файлов (>1000 записей) не возвращаем records в ответе
+    # чтобы избежать ошибки "header too large"
+    # Records будут доступны через отдельный endpoint или CSV файл
+    MAX_RECORDS_IN_RESPONSE = 1000
     
-    for i in range(0, len(df), batch_size):
-        batch_df = df.iloc[i:i + batch_size]
-        batch_records = []
-        for _, row in batch_df.iterrows():
-            batch_records.append({
+    if total <= MAX_RECORDS_IN_RESPONSE:
+        # Для маленьких файлов возвращаем records
+        records = []
+        for _, row in df.iterrows():
+            records.append({
                 "examId": str(row[exam_col]),
                 "questionId": str(row[q_col]),
                 "score": int(row[score_col]),
                 "transcription": str(row[trans_col]) if trans_col and pd.notna(row.get(trans_col)) else ""
             })
-        records.extend(batch_records)
-        
-        # Периодическое логирование для больших файлов
-        if i > 0 and i % 5000 == 0:
-            logger.debug(f"[server] Обработано {i}/{total} записей для сводки")
-
-    return {
-        "totalRecords": total,
-        "averageScore": avg,
-        "distribution": distr,
-        "records": records,
-    }
+        return {
+            "totalRecords": total,
+            "averageScore": avg,
+            "distribution": distr,
+            "records": records,
+        }
+    else:
+        # Для больших файлов не возвращаем records - они доступны в CSV
+        logger.info(f"[server] Файл большой ({total} записей), records не включены в ответ (доступны в CSV)")
+        return {
+            "totalRecords": total,
+            "averageScore": avg,
+            "distribution": distr,
+            "records": None,  # Не возвращаем для больших файлов
+        }
 
 
 def _save_intermediate_result(job_id: str, stage: str, data: Dict[str, Any]) -> None:
@@ -255,10 +259,15 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
         }
         logger.info(f"[server] Средняя оценка: {summary['averageScore']:.2f}, всего записей: {summary['totalRecords']}")
 
-        # Сохраняем результат (JSON)
+        # Сохраняем результат (JSON) - для больших файлов сохраняем без records
         result_path = os.path.join(RESULTS_DIR, f"{job_id}.json")
+        # Для больших файлов не сохраняем records в JSON (они в CSV)
+        json_payload = result_payload.copy()
+        if json_payload.get("totalRecords", 0) > 1000:
+            json_payload["records"] = None
+            json_payload["_note"] = "Records доступны в CSV файле из-за большого размера"
         with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(result_payload, f, ensure_ascii=False, indent=2)
+            json.dump(json_payload, f, ensure_ascii=False, indent=2)
         logger.info(f"[server] JSON сохранен: {result_path}")
 
         # Дополнительно сохраняем CSV для скачивания
