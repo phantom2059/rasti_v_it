@@ -5,6 +5,7 @@ import uuid
 import threading
 import logging
 import time
+import sys
 from datetime import datetime
 from typing import Dict, Any
 
@@ -22,6 +23,9 @@ from inference import run_inference
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Максимальный размер данных для безопасной сериализации (10MB)
+MAX_SAFE_PAYLOAD_SIZE = 10 * 1024 * 1024  # 10MB
 
 
 API_PREFIX = "/api"
@@ -133,6 +137,16 @@ def _save_history(history: Dict[str, Any]) -> None:
         json.dump(history, f, ensure_ascii=False, indent=2)
 
 
+def _estimate_payload_size(payload: Dict[str, Any]) -> int:
+    """Оценивает размер payload в байтах"""
+    try:
+        json_str = json.dumps(payload, ensure_ascii=False)
+        return len(json_str.encode('utf-8'))
+    except Exception:
+        # Если не удалось сериализовать, возвращаем большое значение
+        return sys.maxsize
+
+
 def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
     # Ожидаемые колонки входа: Id экзамена / ID экзамена, Id вопроса / ID вопроса, Транскрибация ответа, Оценка экзаменатора
     def _find_col(cands: list[str]) -> str | None:
@@ -158,13 +172,26 @@ def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
         "score2": int((df[score_col] == 2).sum()),
     }
 
-    # Для больших файлов (>1000 записей) не возвращаем records в ответе
-    # чтобы избежать ошибки "header too large"
-    # Records будут доступны через отдельный endpoint или CSV файл
+    # МНОЖЕСТВЕННЫЕ ЗАЩИТЫ от ошибки "header too large"
+    # 1. По количеству записей
     MAX_RECORDS_IN_RESPONSE = 1000
     
-    if total <= MAX_RECORDS_IN_RESPONSE:
-        # Для маленьких файлов возвращаем records
+    # 2. По размеру транскрибаций (если они очень длинные)
+    avg_transcription_length = 0
+    if trans_col and total > 0:
+        try:
+            avg_transcription_length = df[trans_col].astype(str).str.len().mean()
+        except:
+            avg_transcription_length = 0
+    
+    # Решаем: возвращать ли records
+    should_include_records = (
+        total <= MAX_RECORDS_IN_RESPONSE and 
+        avg_transcription_length < 5000  # Если средняя транскрибация меньше 5KB
+    )
+    
+    if should_include_records:
+        # Для маленьких файлов возвращаем records, но с проверкой размера
         records = []
         for _, row in df.iterrows():
             records.append({
@@ -173,21 +200,33 @@ def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
                 "score": int(row[score_col]),
                 "transcription": str(row[trans_col]) if trans_col and pd.notna(row.get(trans_col)) else ""
             })
-        return {
+        
+        # Проверяем размер payload перед возвратом
+        test_payload = {
             "totalRecords": total,
             "averageScore": avg,
             "distribution": distr,
             "records": records,
         }
-    else:
+        payload_size = _estimate_payload_size(test_payload)
+        
+        if payload_size > MAX_SAFE_PAYLOAD_SIZE:
+            # Если payload слишком большой, не возвращаем records
+            logger.warning(f"[server] Payload слишком большой ({payload_size} байт), records не включены")
+            should_include_records = False
+            records = None
+    
+    if not should_include_records:
         # Для больших файлов не возвращаем records - они доступны в CSV
-        logger.info(f"[server] Файл большой ({total} записей), records не включены в ответ (доступны в CSV)")
-        return {
-            "totalRecords": total,
-            "averageScore": avg,
-            "distribution": distr,
-            "records": None,  # Не возвращаем для больших файлов
-        }
+        logger.info(f"[server] Файл большой ({total} записей, avg_transcription={avg_transcription_length:.0f} символов), records не включены в ответ (доступны в CSV)")
+        records = None
+    
+    return {
+        "totalRecords": total,
+        "averageScore": avg,
+        "distribution": distr,
+        "records": records,  # None для больших файлов
+    }
 
 
 def _save_intermediate_result(job_id: str, stage: str, data: Dict[str, Any]) -> None:
@@ -272,9 +311,9 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
             export_df = result_df[export_cols].copy()
             export_df.columns = export_cols_names
             export_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
-            logger.info(f"[server] ✅ CSV файл успешно сохранен на сервере: {csv_path} ({len(export_df)} записей)")
+            logger.info(f"[server] CSV файл успешно сохранен на сервере: {csv_path} ({len(export_df)} записей)")
         except Exception as e:
-            logger.error(f"[server] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось сохранить CSV файл: {e}")
+            logger.error(f"[server] КРИТИЧЕСКАЯ ОШИБКА: Не удалось сохранить CSV файл: {e}")
             csv_path = None
             # Продолжаем выполнение, но CSV не будет доступен для скачивания
 
@@ -292,17 +331,50 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
         # Сохраняем результат (JSON) - для больших файлов сохраняем без records
         result_path = os.path.join(RESULTS_DIR, f"{job_id}.json")
         try:
-            # Для больших файлов не сохраняем records в JSON (они в CSV)
+            # ГАРАНТИРУЕМ что records не будут в JSON для больших файлов
             json_payload = result_payload.copy()
-            if json_payload.get("totalRecords", 0) > 1000:
+            
+            # Множественные проверки перед сохранением
+            total_records = json_payload.get("totalRecords", 0)
+            records = json_payload.get("records")
+            
+            # Если records есть и файл большой - удаляем их
+            if records is not None and total_records > 1000:
                 json_payload["records"] = None
                 json_payload["_note"] = "Records доступны в CSV файле из-за большого размера"
+            
+            # Дополнительная проверка размера перед сохранением
+            payload_size = _estimate_payload_size(json_payload)
+            if payload_size > MAX_SAFE_PAYLOAD_SIZE and records is not None:
+                logger.warning(f"[server] JSON payload слишком большой ({payload_size} байт), удаляем records")
+                json_payload["records"] = None
+                json_payload["_note"] = "Records доступны в CSV файле из-за большого размера"
+            
+            # Сохраняем JSON
             with open(result_path, "w", encoding="utf-8") as f:
                 json.dump(json_payload, f, ensure_ascii=False, indent=2)
-            logger.info(f"[server] JSON сохранен: {result_path}")
+            logger.info(f"[server] JSON сохранен: {result_path} (размер: {payload_size} байт)")
         except Exception as e:
             logger.error(f"[server] Ошибка сохранения JSON: {e}")
-            result_path = None
+            # Пробуем сохранить минимальную версию без records
+            try:
+                minimal_payload = {
+                    "id": job_id,
+                    "filename": filename,
+                    "status": "completed",
+                    "totalRecords": result_payload.get("totalRecords"),
+                    "averageScore": result_payload.get("averageScore"),
+                    "distribution": result_payload.get("distribution"),
+                    "records": None,
+                    "_note": "Records доступны в CSV файле",
+                    "_error": f"Ошибка сохранения полного JSON: {str(e)}"
+                }
+                with open(result_path, "w", encoding="utf-8") as f:
+                    json.dump(minimal_payload, f, ensure_ascii=False, indent=2)
+                logger.info(f"[server] Сохранен минимальный JSON: {result_path}")
+            except Exception as e2:
+                logger.error(f"[server] Не удалось сохранить даже минимальный JSON: {e2}")
+                result_path = None
 
         # Обновляем историю
         history = _load_history()
@@ -390,8 +462,36 @@ def get_results(result_id: str):
     # completed
     if job.result_path and os.path.exists(job.result_path):
         logger.info(f"[server] Задача {result_id} завершена, возвращаем результаты")
-        with open(job.result_path, "r", encoding="utf-8") as f:
-            payload = json.load(f)
+        try:
+            with open(job.result_path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+            
+            # ДОПОЛНИТЕЛЬНАЯ ЗАЩИТА: проверяем размер payload перед возвратом
+            payload_size = _estimate_payload_size(payload)
+            if payload_size > MAX_SAFE_PAYLOAD_SIZE:
+                logger.warning(f"[server] Payload слишком большой ({payload_size} байт), удаляем records из ответа")
+                payload["records"] = None
+                payload["_note"] = "Records доступны в CSV файле из-за большого размера"
+            
+            # ГАРАНТИРУЕМ что для больших файлов records = None
+            total_records = payload.get("totalRecords", 0)
+            if total_records > 1000 and payload.get("records") is not None:
+                logger.warning(f"[server] Принудительно удаляем records для большого файла ({total_records} записей)")
+                payload["records"] = None
+                payload["_note"] = "Records доступны в CSV файле из-за большого размера"
+                
+        except Exception as e:
+            logger.error(f"[server] Ошибка чтения JSON для {result_id}: {e}")
+            # Создаем минимальный payload
+            payload = {
+                "id": job.id,
+                "filename": job.filename,
+                "status": "completed",
+                "totalRecords": None,
+                "averageScore": None,
+                "distribution": None,
+                "records": None,
+            }
     else:
         # Если JSON не сохранился, создаем минимальный payload из данных задачи
         logger.warning(f"[server] JSON файл не найден для {result_id}, создаем минимальный payload")
@@ -412,7 +512,25 @@ def get_results(result_id: str):
     else:
         logger.warning(f"[server] CSV файл не найден для {result_id}")
     
-    return ResultResponse(**payload)
+    # ФИНАЛЬНАЯ ПРОВЕРКА перед возвратом
+    try:
+        response = ResultResponse(**payload)
+        return response
+    except Exception as e:
+        logger.error(f"[server] Ошибка создания ResultResponse для {result_id}: {e}")
+        # Возвращаем минимальный ответ без records
+        safe_payload = {
+            "id": payload.get("id", result_id),
+            "filename": payload.get("filename", "unknown"),
+            "status": "completed",
+            "totalRecords": payload.get("totalRecords"),
+            "averageScore": payload.get("averageScore"),
+            "distribution": payload.get("distribution"),
+            "records": None,  # Гарантированно None
+        }
+        if job.csv_path and os.path.exists(job.csv_path):
+            safe_payload["downloadUrl"] = f"/api/results/{result_id}/download"
+        return ResultResponse(**safe_payload)
 
 
 @app.get(f"{API_PREFIX}/history")
