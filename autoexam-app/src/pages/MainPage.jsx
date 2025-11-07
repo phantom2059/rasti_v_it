@@ -20,6 +20,7 @@ const MainPage = () => {
   const [processingStatus, setProcessingStatus] = useState(''); // Для статуса обработки
   const [resultId, setResultId] = useState(null); // ID результата для скачивания
   const pollingRef = useRef(null); // Референс для отслеживания активного поллинга
+  const abortControllerRef = useRef(null); // Референс для AbortController
 
   const navigate = useNavigate();
   const { isAuthenticated, user } = useAuth();
@@ -28,19 +29,34 @@ const MainPage = () => {
   // Очистка при размонтировании
   useEffect(() => {
     return () => {
+      // Отменяем все активные запросы
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      // Останавливаем поллинг
       if (pollingRef.current) {
-        console.log('[MainPage] Компонент размонтирован, поллинг должен быть остановлен');
+        pollingRef.current.aborted = true;
+        pollingRef.current = null;
       }
     };
   }, []);
 
   const handleFileSelect = async (file) => {
+    // Отменяем предыдущие запросы
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
     // Останавливаем предыдущий поллинг, если есть
     if (pollingRef.current) {
-      console.log('[MainPage] Останавливаем предыдущий поллинг');
       pollingRef.current.aborted = true;
       pollingRef.current = null;
     }
+
+    // Создаем новый AbortController
+    const abortController = new AbortController();
+    abortControllerRef.current = abortController;
 
     setIsProcessing(true);
     setUploadProgress(0);
@@ -52,31 +68,29 @@ const MainPage = () => {
     pollingRef.current = pollingController;
     
     try {
-      console.log('[MainPage] Начало загрузки файла:', file.name);
       // Загрузка файла
       const result = await uploadFileAPI(file, (progress) => {
-        setUploadProgress(Math.min(progress, 10)); // Загрузка файла - только первые 10%
+        if (abortController.signal.aborted || pollingController.aborted) return;
+        setUploadProgress(Math.min(progress, 10)); // Загрузка файла - только первые 10% 
         setProcessingStatus(`Загрузка файла: ${progress}%`);
-      });
+      }, abortController.signal);
 
-      if (pollingController.aborted) {
-        console.log('[MainPage] Поллинг был прерван после загрузки');
+      if (abortController.signal.aborted || pollingController.aborted) {
         return;
       }
 
       currentResultId = result.id;
-      console.log('[MainPage] Файл загружен, ID результата:', currentResultId);
       setResultId(currentResultId);
       setProcessingStatus('Файл загружен, начинается обработка...');
       setUploadProgress(10);
 
       // Поллинг результата до завершения
-      console.log('[MainPage] Начало поллинга результата:', currentResultId);
       const data = await pollResultsAPI(currentResultId, {
         intervalMs: 3000,
         maxAttempts: 28800, // До 24 часов ожидания (28800 * 3 сек = 86400 сек = 24 часа)
+        signal: abortController.signal,
         onProgress: (progress) => {
-          if (pollingController.aborted) return;
+          if (abortController.signal.aborted || pollingController.aborted) return;
           setUploadProgress(progress);
           if (progress < 30) {
             setProcessingStatus('Нормализация данных...');
@@ -94,12 +108,9 @@ const MainPage = () => {
         }
       });
 
-      if (pollingController.aborted) {
-        console.log('[MainPage] Поллинг был прерван после завершения');
+      if (abortController.signal.aborted || pollingController.aborted) {
         return;
       }
-
-      console.log('[MainPage] Поллинг завершен успешно, результат готов, данные:', data);
       
       // КРИТИЧЕСКИ ВАЖНО: устанавливаем все флаги для показа кнопки скачивания
       setResultId(currentResultId); // Сначала устанавливаем ID
@@ -107,13 +118,18 @@ const MainPage = () => {
       setProcessingStatus('Обработка завершена!'); // И статус
       setIsProcessing(false); // ОБЯЗАТЕЛЬНО останавливаем обработку, чтобы показалась кнопка!
       pollingRef.current = null;
+      abortControllerRef.current = null;
       
-      console.log('[MainPage] Все флаги установлены: resultId=', currentResultId, 'progress=100, isProcessing=false');
       toast.success('Обработка завершена успешно! Файл готов к скачиванию.');
 
     } catch (error) {
-      console.error('[MainPage] Ошибка обработки:', error);
+      // Игнорируем ошибки отмены запроса
+      if (error.name === 'AbortError' || abortController.signal.aborted) {
+        return;
+      }
+      
       pollingRef.current = null;
+      abortControllerRef.current = null;
       const errorMessage = error.message || 'Неизвестная ошибка';
       
       // Если у нас есть resultId, проверяем, может быть файл уже готов
@@ -122,17 +138,15 @@ const MainPage = () => {
           const checkResult = await getResultsAPI(currentResultId);
           if (checkResult.status === 'completed') {
             // Файл готов, несмотря на ошибку!
-            console.log('[MainPage] Файл готов после ошибки поллинга, устанавливаем флаги');
             setResultId(currentResultId); // Сначала ID
             setUploadProgress(100); // Затем прогресс
             setProcessingStatus('Обработка завершена!'); // Статус
             setIsProcessing(false); // ОБЯЗАТЕЛЬНО останавливаем обработку!
-            console.log('[MainPage] Все флаги установлены после проверки');
             toast.success('Файл успешно обработан! Файл готов к скачиванию.');
             return;
           }
         } catch (checkError) {
-          console.warn('Проверка статуса не удалась:', checkError);
+          // Игнорируем ошибки проверки
         }
       }
       
@@ -465,12 +479,17 @@ const MainPage = () => {
                         whileHover={{ scale: 1.02 }}
                         whileTap={{ scale: 0.98 }}
                         onClick={async () => {
+                          // Создаем новый AbortController для этого запроса
+                          const abortController = new AbortController();
+                          abortControllerRef.current = abortController;
+                          
                           // Проверяем статус еще раз
                           try {
-                            const checkResult = await getResultsAPI(resultId);
+                            const checkResult = await getResultsAPI(resultId, abortController.signal);
                             if (checkResult.status === 'completed') {
                               setUploadProgress(100);
                               setProcessingStatus('Обработка завершена!');
+                              abortControllerRef.current = null;
                               handleDownload();
                             } else {
                               toast.error('Файл еще обрабатывается. Подождите...');
@@ -479,7 +498,9 @@ const MainPage = () => {
                               const data = await pollResultsAPI(resultId, {
                                 intervalMs: 3000,
                                 maxAttempts: 28800, // До 24 часов ожидания
+                                signal: abortController.signal,
                                 onProgress: (progress) => {
+                                  if (abortController.signal.aborted) return;
                                   setUploadProgress(progress);
                                   if (progress < 30) {
                                     setProcessingStatus('Нормализация данных...');
@@ -496,12 +517,19 @@ const MainPage = () => {
                                   }
                                 }
                               });
-                              setUploadProgress(100);
-                              setProcessingStatus('Обработка завершена!');
-                              setIsProcessing(false);
-                              handleDownload();
+                              if (!abortController.signal.aborted) {
+                                setUploadProgress(100);
+                                setProcessingStatus('Обработка завершена!');
+                                setIsProcessing(false);
+                                abortControllerRef.current = null;
+                                handleDownload();
+                              }
                             }
                           } catch (error) {
+                            if (error.name === 'AbortError' || error.message === 'Запрос был отменен') {
+                              return;
+                            }
+                            abortControllerRef.current = null;
                             toast.error('Не удалось проверить статус: ' + error.message);
                           }
                         }}

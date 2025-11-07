@@ -108,6 +108,7 @@ def _caption_images(unique_links: List[str]) -> List[str]:
     ]
     results = []
     for idx, url in enumerate(unique_links):
+        # Логируем каждое изображение
         logger.info(f"[inference] Генерация подписи {idx+1}/{len(unique_links)}: {url[:50]}...")
         word = random.choice(replaces)
         caption = _generate_image_caption(model, processor, word, url)
@@ -118,7 +119,8 @@ def _caption_images(unique_links: List[str]) -> List[str]:
             if torch.cuda.is_available():
                 torch.cuda.empty_cache()
             gc.collect()
-            logger.debug(f"[inference] Периодическая очистка памяти после {idx + 1} изображений")
+            if (idx + 1) % 10 == 0:  # Логируем очистку каждые 10 изображений
+                logger.debug(f"[inference] Периодическая очистка памяти после {idx + 1} изображений")
 
     elapsed = time.time() - start
     logger.info(f"[inference] Подписи к изображениям сгенерированы: {len(results)} за {elapsed:.1f} сек ({elapsed/len(unique_links):.1f} сек/изображение)")
@@ -149,11 +151,12 @@ def _summarize_transcription_for_image_tasks(df: pd.DataFrame) -> None:
         try:
             if int(df.loc[i, "Тип теста"]) == 1:
                 processed += 1
-                if processed % 5 == 0 or processed == total_with_images:
+                # Логируем каждые 5 записей или последнюю
+                if processed % 5 == 0 or processed == total_with_images or processed == 1:
                     elapsed = time.time() - start
                     eta = (elapsed / processed * (total_with_images - processed)) if processed > 0 else 0
                     logger.info(f"[inference] Сжатие транскрибаций: {processed}/{total_with_images} ({elapsed:.1f} сек, ETA: {eta:.1f} сек)")
-                    # Периодическая очистка памяти каждые 5 записей
+                    # Периодическая очистка памяти каждые 10 записей
                     if processed % 10 == 0 and torch.cuda.is_available():
                         torch.cuda.empty_cache()
                 text_value = str(df.loc[i, "Транскрибация ответа"]) if "Транскрибация ответа" in df.columns else ""

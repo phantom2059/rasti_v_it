@@ -82,7 +82,7 @@ export const getHistory = async (userId) => {
 };
 
 // Реальный API запрос (когда бэк будет готов)
-export const uploadFileAPI = async (file, onProgress) => {
+export const uploadFileAPI = async (file, onProgress, signal = null) => {
   const formData = new FormData();
   formData.append('file', file);
 
@@ -92,7 +92,9 @@ export const uploadFileAPI = async (file, onProgress) => {
         'Content-Type': 'multipart/form-data',
       },
       timeout: 86400000, // 24 часа
+      signal: signal, // Поддержка AbortController
       onUploadProgress: (progressEvent) => {
+        if (signal && signal.aborted) return;
         if (!onProgress || !progressEvent.total) return;
         const percent = Math.round((progressEvent.loaded * 100) / progressEvent.total);
         onProgress(percent);
@@ -100,19 +102,24 @@ export const uploadFileAPI = async (file, onProgress) => {
     });
     return response.data;
   } catch (error) {
-    console.error('Error uploading file:', error);
+    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+      throw new Error('Запрос был отменен');
+    }
     throw error;
   }
 };
 
-export const getResultsAPI = async (id) => {
+export const getResultsAPI = async (id, signal = null) => {
   try {
     const response = await apiClient.get(`/results/${id}`, {
       timeout: 86400000, // 24 часа
+      signal: signal, // Поддержка AbortController
     });
     return response.data;
   } catch (error) {
-    console.error(`[getResultsAPI] Ошибка получения результата ${id}:`, error.message);
+    if (error.name === 'CanceledError' || error.name === 'AbortError') {
+      throw new Error('Запрос был отменен');
+    }
     throw error;
   }
 };
@@ -130,29 +137,49 @@ export const getHistoryAPI = async () => {
 // Глобальный счетчик активных поллингов для предотвращения дублей
 const activePolling = new Map();
 
-export const pollResultsAPI = async (id, { intervalMs = 3000, maxAttempts = 28800, onProgress } = {}) => {
+export const pollResultsAPI = async (id, { intervalMs = 3000, maxAttempts = 288000, onProgress, signal = null } = {}) => {
   // Проверяем, не запущен ли уже поллинг для этого ID
   if (activePolling.has(id)) {
-    console.warn(`[pollResultsAPI] Поллинг для ${id} уже запущен, игнорируем дубликат`);
     throw new Error('Поллинг уже запущен для этого ID');
   }
 
   activePolling.set(id, true);
-  console.log(`[pollResultsAPI] Начало поллинга для ${id}, интервал: ${intervalMs}мс, максимум попыток: ${maxAttempts}`);
   
   let attempts = 0;
-  let lastError = null;
+  let timeoutId = null;
+  let isAborted = false;
+  
+  // Обработчик отмены через AbortController
+  if (signal) {
+    signal.addEventListener('abort', () => {
+      isAborted = true;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
+      activePolling.delete(id);
+    });
+  }
   
   try {
-    while (attempts < maxAttempts) {
+    while (attempts < maxAttempts && !isAborted) {
+      // Проверяем отмену перед каждой итерацией
+      if (signal && signal.aborted) {
+        throw new Error('Запрос был отменен');
+      }
+      
       try {
-        if (attempts % 10 === 0 && attempts > 0) {
-          console.log(`[pollResultsAPI] ${id}: попытка ${attempts}/${maxAttempts} (${(attempts * intervalMs / 1000 / 60).toFixed(1)} минут прошло)`);
+        // Логируем каждые 10 попыток (каждую минуту при интервале 3 сек: 10 * 3 = 30 сек, но каждые 20 попыток = 1 минута)
+        // При интервале 3 секунды: 20 попыток = 60 секунд = 1 минута
+        const attemptsPerMinute = Math.floor(60000 / intervalMs); // Сколько попыток в минуту
+        if (attempts % attemptsPerMinute === 0 && attempts > 0) {
+          const minutesPassed = (attempts * intervalMs / 1000 / 60).toFixed(1);
+          console.log(`[pollResultsAPI] ${id}: попытка ${attempts}/${maxAttempts} (${minutesPassed} минут прошло, статус: processing)`);
         }
-        const data = await getResultsAPI(id);
+        
+        const data = await getResultsAPI(id, signal);
       
         // Обработка прогресса на основе статуса
-        if (onProgress) {
+        if (onProgress && !isAborted) {
           if (data.status === 'queued') {
             onProgress(5); // Файл загружен, очередь
           } else if (data.status === 'processing') {
@@ -168,7 +195,6 @@ export const pollResultsAPI = async (id, { intervalMs = 3000, maxAttempts = 2880
         if (data.status === 'completed') {
           // Убеждаемся, что результат действительно готов
           if (data.downloadUrl || data.totalRecords !== null) {
-            console.log(`[pollResultsAPI] ${id}: результат готов после ${attempts} попыток`);
             activePolling.delete(id);
             return data;
           }
@@ -177,28 +203,56 @@ export const pollResultsAPI = async (id, { intervalMs = 3000, maxAttempts = 2880
           throw new Error('Обработка завершилась с ошибкой');
         }
         
-        lastError = null; // Сбрасываем ошибку при успешном запросе
-        await new Promise((r) => setTimeout(r, intervalMs));
+        // Ожидание с поддержкой отмены
+        await new Promise((resolve, reject) => {
+          if (signal && signal.aborted) {
+            reject(new Error('Запрос был отменен'));
+            return;
+          }
+          timeoutId = setTimeout(() => {
+            resolve();
+          }, intervalMs);
+        });
         attempts += 1;
       } catch (error) {
-        lastError = error;
+        // Проверяем отмену
+        if (error.name === 'CanceledError' || error.name === 'AbortError' || error.message === 'Запрос был отменен' || isAborted) {
+          throw new Error('Запрос был отменен');
+        }
+        
         // Если это не критическая ошибка (например, временная проблема сети), продолжаем
         if (error.response && error.response.status >= 500) {
           // Серверная ошибка - продолжаем попытки
-          console.warn(`[pollResultsAPI] Ошибка сервера (попытка ${attempts + 1}/${maxAttempts}):`, error.message);
-          await new Promise((r) => setTimeout(r, intervalMs * 2)); // Удваиваем интервал при ошибке
+          await new Promise((resolve) => {
+            if (signal && signal.aborted) {
+              resolve();
+              return;
+            }
+            timeoutId = setTimeout(() => resolve(), intervalMs * 2); // Удваиваем интервал при ошибке
+          });
           attempts += 1;
           continue;
         } else if (error.response && error.response.status === 404) {
           // Результат еще не создан - это нормально, продолжаем
-          await new Promise((r) => setTimeout(r, intervalMs));
+          await new Promise((resolve) => {
+            if (signal && signal.aborted) {
+              resolve();
+              return;
+            }
+            timeoutId = setTimeout(() => resolve(), intervalMs);
+          });
           attempts += 1;
           continue;
         } else {
           // Другая ошибка - пробуем еще раз, но не более нескольких раз подряд
           if (attempts < 10) {
-            console.warn(`[pollResultsAPI] Временная ошибка (попытка ${attempts + 1}/${maxAttempts}):`, error.message);
-            await new Promise((r) => setTimeout(r, intervalMs));
+            await new Promise((resolve) => {
+              if (signal && signal.aborted) {
+                resolve();
+                return;
+              }
+              timeoutId = setTimeout(() => resolve(), intervalMs);
+            });
             attempts += 1;
             continue;
           }
@@ -209,21 +263,28 @@ export const pollResultsAPI = async (id, { intervalMs = 3000, maxAttempts = 2880
     }
     
     // Если достигли максимума попыток, проверяем последний статус
-    try {
-      console.log(`[pollResultsAPI] ${id}: достигнут максимум попыток, финальная проверка...`);
-      const finalData = await getResultsAPI(id);
-      if (finalData.status === 'completed') {
-        activePolling.delete(id);
-        return finalData;
+    if (!isAborted) {
+      try {
+        const finalData = await getResultsAPI(id, signal);
+        if (finalData.status === 'completed') {
+          activePolling.delete(id);
+          return finalData;
+        }
+      } catch (e) {
+        // Игнорируем ошибки финальной проверки
       }
-    } catch (e) {
-      console.warn(`[pollResultsAPI] ${id}: финальная проверка не удалась:`, e.message);
     }
     
-    activePolling.delete(id);
+    if (isAborted) {
+      throw new Error('Запрос был отменен');
+    }
+    
     throw new Error(`Таймаут ожидания результата (${maxAttempts * intervalMs / 1000 / 60 / 60} часов)`);
   } finally {
-    // Убеждаемся, что очищаем запись даже при ошибке
+    // Очищаем таймер и запись
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+    }
     activePolling.delete(id);
   }
 };

@@ -4,6 +4,7 @@ import json
 import uuid
 import threading
 import logging
+import time
 from datetime import datetime
 from typing import Dict, Any
 
@@ -89,6 +90,27 @@ class JobStore:
 
 jobs = JobStore()
 
+# Умное логирование для запросов статуса
+_last_status_log = {}  # {result_id: (last_log_time, last_status)}
+
+
+def _should_log_status(result_id: str, current_status: str) -> bool:
+    """Логируем статус каждую минуту или при изменении статуса"""
+    now = time.time()
+    if result_id not in _last_status_log:
+        _last_status_log[result_id] = (now, current_status)
+        return True
+    
+    last_time, last_status = _last_status_log[result_id]
+    
+    # Логируем если прошло больше 60 секунд (1 минута) или статус изменился
+    should_log = (now - last_time > 60) or (current_status != last_status)
+    
+    if should_log:
+        _last_status_log[result_id] = (now, current_status)
+    
+    return should_log
+
 
 def _detect_delimiter(sample: str) -> str:
     # Простой детектор: если присутствует ';' в заголовке — используем его, иначе ','
@@ -136,14 +158,25 @@ def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
         "score2": int((df[score_col] == 2).sum()),
     }
 
+    # Обработка больших данных батчами для предотвращения проблем с памятью
     records = []
-    for _, row in df.iterrows():
-        records.append({
-            "examId": str(row[exam_col]),
-            "questionId": str(row[q_col]),
-            "score": int(row[score_col]),
-            "transcription": str(row[trans_col]) if trans_col and pd.notna(row.get(trans_col)) else ""
-        })
+    batch_size = 10  # Обрабатываем по 10 записей за раз
+    
+    for i in range(0, len(df), batch_size):
+        batch_df = df.iloc[i:i + batch_size]
+        batch_records = []
+        for _, row in batch_df.iterrows():
+            batch_records.append({
+                "examId": str(row[exam_col]),
+                "questionId": str(row[q_col]),
+                "score": int(row[score_col]),
+                "transcription": str(row[trans_col]) if trans_col and pd.notna(row.get(trans_col)) else ""
+            })
+        records.extend(batch_records)
+        
+        # Периодическое логирование для больших файлов
+        if i > 0 and i % 5000 == 0:
+            logger.debug(f"[server] Обработано {i}/{total} записей для сводки")
 
     return {
         "totalRecords": total,
@@ -151,6 +184,24 @@ def _summarize_results(df: pd.DataFrame) -> Dict[str, Any]:
         "distribution": distr,
         "records": records,
     }
+
+
+def _save_intermediate_result(job_id: str, stage: str, data: Dict[str, Any]) -> None:
+    """Сохраняет промежуточные результаты для возможности восстановления"""
+    intermediate_dir = os.path.join(RESULTS_DIR, "intermediate")
+    os.makedirs(intermediate_dir, exist_ok=True)
+    intermediate_path = os.path.join(intermediate_dir, f"{job_id}_{stage}.json")
+    try:
+        with open(intermediate_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "job_id": job_id,
+                "stage": stage,
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "data": data
+            }, f, ensure_ascii=False, indent=2)
+        logger.debug(f"[server] Промежуточный результат сохранен: {stage}")
+    except Exception as e:
+        logger.warning(f"[server] Не удалось сохранить промежуточный результат {stage}: {e}")
 
 
 def _background_process(job_id: str, upload_path: str, filename: str) -> None:
@@ -167,11 +218,31 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
 
         df = pd.read_csv(upload_path, sep=sep)
         logger.info(f"[server] Загружено {len(df)} строк из CSV")
+        
+        # Сохраняем исходный CSV сразу после загрузки для восстановления
+        original_csv_path = os.path.join(RESULTS_DIR, f"{job_id}_original.csv")
+        try:
+            df.to_csv(original_csv_path, index=False, sep=sep, encoding='utf-8')
+            logger.info(f"[server] Исходный CSV сохранен: {original_csv_path}")
+        except Exception as e:
+            logger.warning(f"[server] Не удалось сохранить исходный CSV: {e}")
+        
+        # Сохраняем промежуточный результат после загрузки CSV
+        _save_intermediate_result(job_id, "csv_loaded", {
+            "rows_count": len(df),
+            "columns": list(df.columns)
+        })
 
         # Запускаем инференс
         logger.info(f"[server] Запуск ML-инференса")
         result_df = run_inference(df)
         logger.info(f"[server] Инференс завершен")
+        
+        # Сохраняем промежуточный результат после инференса
+        _save_intermediate_result(job_id, "inference_completed", {
+            "rows_count": len(result_df),
+            "has_score_column": "Оценка экзаменатора" in result_df.columns
+        })
 
         # Сводка + упаковка результата для API
         logger.info(f"[server] Формирование результатов")
@@ -210,7 +281,9 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
             export_df = df_csv[export_cols]
             export_df.columns = export_cols_names
             export_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
-        except Exception:
+            logger.info(f"[server] CSV сохранен: {csv_path}")
+        except Exception as e:
+            logger.warning(f"[server] Не удалось сохранить CSV: {e}")
             csv_path = None
 
         # Обновляем историю
@@ -232,6 +305,11 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
         logger.info(f"[server] Задача {job_id} выполнена успешно")
     except Exception as e:
         logger.error(f"[server] Ошибка в задаче {job_id}: {e}")
+        # Сохраняем информацию об ошибке как промежуточный результат
+        _save_intermediate_result(job_id, "error", {
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
         jobs.update(job_id, status="failed", error=str(e))
 
 
@@ -274,13 +352,14 @@ def upload_options():
 
 @app.get(f"{API_PREFIX}/results/{{result_id}}", response_model=ResultResponse)
 def get_results(result_id: str):
-    logger.info(f"[server] GET /api/results/{result_id} - запрос статуса")
     job = jobs.get(result_id)
     if job is None:
         logger.warning(f"[server] Результат {result_id} не найден")
         raise HTTPException(status_code=404, detail="Результат не найден")
 
-    logger.info(f"[server] Статус задачи {result_id}: {job.status}")
+    # Умное логирование - только если прошло время или статус изменился
+    if _should_log_status(result_id, job.status):
+        logger.info(f"[server] GET /api/results/{result_id} - статус: {job.status}")
 
     if job.status in ("queued", "processing"):
         return ResultResponse(id=job.id, filename=job.filename, status=job.status, totalRecords=None,
