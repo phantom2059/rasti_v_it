@@ -248,8 +248,38 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
             "has_score_column": "Оценка экзаменатора" in result_df.columns
         })
 
-        # Сводка + упаковка результата для API
-        logger.info(f"[server] Формирование результатов")
+        # ВАЖНО: Сначала сохраняем CSV файл (критически важно - он должен быть на сервере)
+        csv_path = os.path.join(RESULTS_DIR, f"{job_id}.csv")
+        try:
+            logger.info(f"[server] Сохранение CSV файла: {csv_path}")
+            # Определяем реальные названия ID колонок
+            def _find_col(cands: list[str]) -> str | None:
+                cols_lower = {c.lower(): c for c in result_df.columns}
+                for c in cands:
+                    if c.lower() in cols_lower:
+                        return cols_lower[c.lower()]
+                return None
+            exam_col = _find_col(["Id экзамена", "ID экзамена"])
+            q_col = _find_col(["Id вопроса", "ID вопроса"])
+            score_col = _find_col(["Оценка экзаменатора"])
+            
+            if not all([exam_col, q_col, score_col]):
+                raise ValueError("Не найдены необходимые колонки для CSV экспорта")
+            
+            # Сохраняем CSV с нужными колонками
+            export_cols = [exam_col, q_col, score_col]
+            export_cols_names = ["ID экзамена", "ID вопроса", "Оценка экзаменатора"]
+            export_df = result_df[export_cols].copy()
+            export_df.columns = export_cols_names
+            export_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
+            logger.info(f"[server] ✅ CSV файл успешно сохранен на сервере: {csv_path} ({len(export_df)} записей)")
+        except Exception as e:
+            logger.error(f"[server] ❌ КРИТИЧЕСКАЯ ОШИБКА: Не удалось сохранить CSV файл: {e}")
+            csv_path = None
+            # Продолжаем выполнение, но CSV не будет доступен для скачивания
+
+        # Сводка + упаковка результата для API (без records для больших файлов)
+        logger.info(f"[server] Формирование результатов для API")
         summary = _summarize_results(result_df)
         result_payload = {
             "id": job_id,
@@ -261,39 +291,18 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
 
         # Сохраняем результат (JSON) - для больших файлов сохраняем без records
         result_path = os.path.join(RESULTS_DIR, f"{job_id}.json")
-        # Для больших файлов не сохраняем records в JSON (они в CSV)
-        json_payload = result_payload.copy()
-        if json_payload.get("totalRecords", 0) > 1000:
-            json_payload["records"] = None
-            json_payload["_note"] = "Records доступны в CSV файле из-за большого размера"
-        with open(result_path, "w", encoding="utf-8") as f:
-            json.dump(json_payload, f, ensure_ascii=False, indent=2)
-        logger.info(f"[server] JSON сохранен: {result_path}")
-
-        # Дополнительно сохраняем CSV для скачивания
-        csv_path = os.path.join(RESULTS_DIR, f"{job_id}.csv")
         try:
-            # На всякий случай собираем CSV с минимально необходимыми колонками
-            df_csv = result_df.copy()
-            # Определяем реальные названия ID колонок
-            def _find_col(cands: list[str]) -> str | None:
-                cols_lower = {c.lower(): c for c in df_csv.columns}
-                for c in cands:
-                    if c.lower() in cols_lower:
-                        return cols_lower[c.lower()]
-                return None
-            exam_col = _find_col(["Id экзамена", "ID экзамена"])
-            q_col = _find_col(["Id вопроса", "ID вопроса"])
-            score_col = _find_col(["Оценка экзаменатора"])  
-            export_cols = [exam_col, q_col, score_col]
-            export_cols_names = ["ID экзамена", "ID вопроса", "Оценка экзаменатора"]
-            export_df = df_csv[export_cols]
-            export_df.columns = export_cols_names
-            export_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
-            logger.info(f"[server] CSV сохранен: {csv_path}")
+            # Для больших файлов не сохраняем records в JSON (они в CSV)
+            json_payload = result_payload.copy()
+            if json_payload.get("totalRecords", 0) > 1000:
+                json_payload["records"] = None
+                json_payload["_note"] = "Records доступны в CSV файле из-за большого размера"
+            with open(result_path, "w", encoding="utf-8") as f:
+                json.dump(json_payload, f, ensure_ascii=False, indent=2)
+            logger.info(f"[server] JSON сохранен: {result_path}")
         except Exception as e:
-            logger.warning(f"[server] Не удалось сохранить CSV: {e}")
-            csv_path = None
+            logger.error(f"[server] Ошибка сохранения JSON: {e}")
+            result_path = None
 
         # Обновляем историю
         history = _load_history()
@@ -379,13 +388,30 @@ def get_results(result_id: str):
         raise HTTPException(status_code=500, detail=f"Обработка завершилась с ошибкой: {job.error}")
 
     # completed
-    assert job.result_path and os.path.exists(job.result_path)
-    logger.info(f"[server] Задача {result_id} завершена, возвращаем результаты")
-    with open(job.result_path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
-    # Добавим ссылку на скачивание если CSV есть
+    if job.result_path and os.path.exists(job.result_path):
+        logger.info(f"[server] Задача {result_id} завершена, возвращаем результаты")
+        with open(job.result_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    else:
+        # Если JSON не сохранился, создаем минимальный payload из данных задачи
+        logger.warning(f"[server] JSON файл не найден для {result_id}, создаем минимальный payload")
+        payload = {
+            "id": job.id,
+            "filename": job.filename,
+            "status": "completed",
+            "totalRecords": None,
+            "averageScore": None,
+            "distribution": None,
+            "records": None,
+        }
+    
+    # ВСЕГДА добавляем ссылку на скачивание если CSV есть (это главное!)
     if job.csv_path and os.path.exists(job.csv_path):
         payload["downloadUrl"] = f"/api/results/{result_id}/download"
+        logger.info(f"[server] CSV файл доступен для скачивания: {job.csv_path}")
+    else:
+        logger.warning(f"[server] CSV файл не найден для {result_id}")
+    
     return ResultResponse(**payload)
 
 
