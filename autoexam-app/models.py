@@ -120,6 +120,7 @@ def get_text_model_and_tokenizer():
                     device_map="auto",
                     trust_remote_code=True,
                     dtype=torch.float16,
+                    low_cpu_mem_usage=True,
                 )
             else:
                 raise RuntimeError("CUDA недоступна, используем fp16/32")
@@ -130,6 +131,7 @@ def get_text_model_and_tokenizer():
                 device_map="auto",
                 trust_remote_code=True,
                 dtype=torch.float16 if torch.cuda.is_available() else torch.float32,
+                low_cpu_mem_usage=True,
             )
 
         logger.info(f"[models] Загрузка LoRA адаптера из {ADAPTER_PATH}...")
