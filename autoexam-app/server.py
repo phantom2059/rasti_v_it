@@ -117,8 +117,38 @@ def _should_log_status(result_id: str, current_status: str) -> bool:
 
 
 def _detect_delimiter(sample: str) -> str:
-    # Простой детектор: если присутствует ';' в заголовке — используем его, иначе ','
-    return ';' if ';' in sample.splitlines()[0] else ','
+    """Улучшенное определение разделителя CSV файла"""
+    if not sample:
+        return ';'
+    
+    lines = sample.splitlines()
+    if not lines:
+        return ';'
+    
+    # Проверяем первую строку (заголовок)
+    first_line = lines[0]
+    
+    # Если в первой строке есть ';', используем его
+    if ';' in first_line:
+        # Проверяем что это действительно разделитель, а не часть данных
+        # Считаем количество ';' в первой строке
+        semicolon_count = first_line.count(';')
+        # Если ';' встречается несколько раз, это скорее всего разделитель
+        if semicolon_count >= 2:
+            return ';'
+    
+    # Проверяем запятые
+    if ',' in first_line:
+        comma_count = first_line.count(',')
+        if comma_count >= 2:
+            return ','
+    
+    # Проверяем табуляцию
+    if '\t' in first_line:
+        return '\t'
+    
+    # По умолчанию ';' для русских CSV файлов
+    return ';'
 
 
 def _load_history() -> Dict[str, Any]:
@@ -269,8 +299,51 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
         sep = _detect_delimiter(sample) if sample else ';'
         logger.info(f"[server] Разделитель CSV: '{sep}'")
 
-        df = pd.read_csv(upload_path, sep=sep)
-        logger.info(f"[server] Загружено {len(df)} строк из CSV")
+        # Читаем CSV с обработкой ошибок
+        try:
+            df = pd.read_csv(upload_path, sep=sep, encoding='utf-8', on_bad_lines='skip', engine='python')
+            
+            # КРИТИЧЕСКАЯ ПРОВЕРКА: убеждаемся что CSV правильно распарсен
+            if len(df.columns) == 1 and ';' in str(df.columns[0]):
+                logger.warning(f"[server] CSV не распарсен правильно (1 колонка), пробуем разделитель ';'")
+                # Пробуем принудительно с ';'
+                df = pd.read_csv(upload_path, sep=';', encoding='utf-8', on_bad_lines='skip', engine='python')
+                sep = ';'
+            
+            # Проверяем что есть необходимые колонки
+            expected_cols_lower = ['id экзамена', 'id вопроса', '№ вопроса', 'транскрибация ответа']
+            df_cols_lower = [col.lower() for col in df.columns]
+            found_cols = [col for col in expected_cols_lower if any(col in df_col for df_col in df_cols_lower)]
+            
+            if len(found_cols) < 2:
+                logger.error(f"[server] КРИТИЧЕСКАЯ ОШИБКА: CSV файл не содержит необходимые колонки!")
+                logger.error(f"[server] Найдены колонки: {list(df.columns)}")
+                logger.error(f"[server] Ожидались колонки содержащие: {expected_cols_lower}")
+                raise ValueError(f"CSV файл не содержит необходимые колонки. Найдено колонок: {len(df.columns)}, колонки: {list(df.columns)}")
+            
+            logger.info(f"[server] Загружено {len(df)} строк из CSV, колонок: {len(df.columns)}")
+            logger.info(f"[server] Колонки: {list(df.columns)}")
+            
+        except Exception as csv_error:
+            error_msg = str(csv_error)
+            if len(error_msg) > 200:
+                error_msg = error_msg[:200] + "... [обрезано]"
+            logger.error(f"[server] Ошибка чтения CSV файла: {error_msg}")
+            # Пробуем другие разделители
+            for alt_sep in [';', ',', '\t']:
+                if alt_sep != sep:
+                    try:
+                        logger.info(f"[server] Пробуем разделитель '{alt_sep}'...")
+                        df = pd.read_csv(upload_path, sep=alt_sep, encoding='utf-8', on_bad_lines='skip', engine='python')
+                        if len(df.columns) > 1:
+                            logger.info(f"[server] Успешно загружено с разделителем '{alt_sep}', колонок: {len(df.columns)}")
+                            sep = alt_sep
+                            break
+                    except Exception:
+                        continue
+            else:
+                # Если ничего не помогло - пробрасываем ошибку дальше
+                raise ValueError(f"Не удалось прочитать CSV файл. Ошибка: {error_msg}")
         
         # Сохраняем исходный CSV сразу после загрузки для восстановления
         original_csv_path = os.path.join(RESULTS_DIR, f"{job_id}_original.csv")
