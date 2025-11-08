@@ -248,9 +248,19 @@ def _save_intermediate_result(job_id: str, stage: str, data: Dict[str, Any]) -> 
 
 
 def _background_process(job_id: str, upload_path: str, filename: str) -> None:
+    """
+    Фоновая обработка задачи. ВАЖНО: функция должна быть полностью изолирована,
+    не передавать большие объекты через исключения или возвращаемые значения.
+    """
+    # Внешний try-except для перехвата ВСЕХ ошибок, включая ошибки сериализации
     try:
-        logger.info(f"[server] Начало обработки задачи {job_id}: {filename}")
-        jobs.update(job_id, status="processing")
+        try:
+            logger.info(f"[server] Начало обработки задачи {job_id}: {filename}")
+            jobs.update(job_id, status="processing")
+        except Exception as init_error:
+            # Если даже обновление статуса не удалось - логируем но продолжаем
+            logger.error(f"[server] Ошибка при инициализации задачи {job_id}: {init_error}")
+            # Не падаем, продолжаем обработку
 
         # Читаем CSV с авто-детектом разделителя
         logger.info(f"[server] Чтение CSV {filename}")
@@ -276,10 +286,39 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
             "columns": list(df.columns)
         })
 
-        # Запускаем инференс
-        logger.info(f"[server] Запуск ML-инференса")
-        result_df = run_inference(df)
-        logger.info(f"[server] Инференс завершен")
+        # Запускаем инференс в отдельном try-except для изоляции ошибок
+        try:
+            logger.info(f"[server] Запуск ML-инференса")
+            result_df = run_inference(df)
+            logger.info(f"[server] Инференс завершен")
+        except Exception as inference_error:
+            # Обрабатываем ошибки инференса отдельно
+            error_msg = str(inference_error)
+            if len(error_msg) > 500:
+                error_msg = error_msg[:500] + "... [обрезано]"
+            logger.error(f"[server] Ошибка инференса для {job_id}: {error_msg}")
+            # Освобождаем память от DataFrame
+            del df
+            import gc
+            gc.collect()
+            # Пробуем сохранить CSV если он был создан до ошибки
+            csv_path = None
+            try:
+                # Пробуем сохранить хотя бы исходный CSV
+                original_csv_path = os.path.join(RESULTS_DIR, f"{job_id}_original.csv")
+                if os.path.exists(original_csv_path):
+                    csv_path = original_csv_path
+            except:
+                pass
+            # Обновляем статус с коротким сообщением
+            try:
+                jobs.update(job_id, status="failed", error=error_msg)
+            except:
+                try:
+                    jobs.update(job_id, status="failed", error="Ошибка инференса")
+                except:
+                    pass
+            return  # Выходим из функции
         
         # Сохраняем промежуточный результат после инференса
         _save_intermediate_result(job_id, "inference_completed", {
@@ -393,14 +432,71 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
 
         jobs.update(job_id, status="completed", result_path=result_path, csv_path=csv_path)
         logger.info(f"[server] Задача {job_id} выполнена успешно")
+        
+        # КРИТИЧЕСКИ ВАЖНО: очищаем большие объекты перед выходом из функции
+        # чтобы они не попали в сериализацию при обработке исключений
+        try:
+            del result_df, df, summary, result_payload, json_payload
+            import gc
+            gc.collect()
+        except:
+            pass
+            
     except Exception as e:
-        logger.error(f"[server] Ошибка в задаче {job_id}: {e}")
+        # КРИТИЧЕСКИ ВАЖНО: очищаем все большие объекты ПЕРЕД обработкой ошибки
+        # чтобы они не попали в сериализацию исключения
+        try:
+            if 'df' in locals():
+                del df
+            if 'result_df' in locals():
+                del result_df
+            if 'summary' in locals():
+                del summary
+            if 'result_payload' in locals():
+                del result_payload
+            import gc
+            gc.collect()
+        except:
+            pass
+        
+        # КРИТИЧЕСКИ ВАЖНО: обрезаем сообщение об ошибке чтобы избежать "header too large"
+        error_msg = str(e)
+        # Ограничиваем длину сообщения об ошибке (макс 200 символов для безопасности)
+        if len(error_msg) > 200:
+            error_msg = error_msg[:200] + "... [обрезано]"
+        
+        # Убираем большие объекты из traceback если они есть
+        error_type = type(e).__name__
+        
+        # Логируем только тип ошибки и короткое сообщение
+        logger.error(f"[server] Ошибка в задаче {job_id}: {error_type}: {error_msg}")
+        
         # Сохраняем информацию об ошибке как промежуточный результат
-        _save_intermediate_result(job_id, "error", {
-            "error": str(e),
-            "error_type": type(e).__name__
-        })
-        jobs.update(job_id, status="failed", error=str(e))
+        try:
+            _save_intermediate_result(job_id, "error", {
+                "error": error_msg,
+                "error_type": error_type
+            })
+        except Exception as save_error:
+            # Если даже сохранение не удалось - просто логируем
+            logger.error(f"[server] Не удалось сохранить информацию об ошибке: {save_error}")
+        
+        # Обновляем статус с обрезанным сообщением об ошибке
+        # Используем несколько уровней fallback
+        update_success = False
+        for attempt_msg in [error_msg, "Ошибка обработки", "Ошибка"]:
+            try:
+                jobs.update(job_id, status="failed", error=attempt_msg)
+                update_success = True
+                break
+            except Exception as update_error:
+                # Пробуем следующий вариант
+                continue
+        
+        if not update_success:
+            # Если даже обновление не удалось - логируем но не падаем
+            logger.error(f"[server] КРИТИЧЕСКАЯ ОШИБКА: Не удалось обновить статус задачи {job_id}")
+            # Не делаем ничего больше - функция завершается без исключения
 
 
 app = FastAPI(title="AutoExam API")
