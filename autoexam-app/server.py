@@ -327,30 +327,14 @@ def _background_process(job_id: str, upload_path: str, filename: str) -> None:
         })
 
         # ВАЖНО: Сначала сохраняем CSV файл (критически важно - он должен быть на сервере)
+        # Сохраняем ПОЛНЫЙ файл со ВСЕМИ колонками и данными
         csv_path = os.path.join(RESULTS_DIR, f"{job_id}.csv")
         try:
-            logger.info(f"[server] Сохранение CSV файла: {csv_path}")
-            # Определяем реальные названия ID колонок
-            def _find_col(cands: list[str]) -> str | None:
-                cols_lower = {c.lower(): c for c in result_df.columns}
-                for c in cands:
-                    if c.lower() in cols_lower:
-                        return cols_lower[c.lower()]
-                return None
-            exam_col = _find_col(["Id экзамена", "ID экзамена"])
-            q_col = _find_col(["Id вопроса", "ID вопроса"])
-            score_col = _find_col(["Оценка экзаменатора"])
-            
-            if not all([exam_col, q_col, score_col]):
-                raise ValueError("Не найдены необходимые колонки для CSV экспорта")
-            
-            # Сохраняем CSV с нужными колонками
-            export_cols = [exam_col, q_col, score_col]
-            export_cols_names = ["ID экзамена", "ID вопроса", "Оценка экзаменатора"]
-            export_df = result_df[export_cols].copy()
-            export_df.columns = export_cols_names
-            export_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
-            logger.info(f"[server] CSV файл успешно сохранен на сервере: {csv_path} ({len(export_df)} записей)")
+            logger.info(f"[server] Сохранение ПОЛНОГО CSV файла со всеми данными: {csv_path}")
+            # Сохраняем ВЕСЬ DataFrame со всеми колонками и данными
+            # Используем тот же разделитель что и в исходном файле
+            result_df.to_csv(csv_path, index=False, sep=';', encoding='utf-8')
+            logger.info(f"[server] ✅ ПОЛНЫЙ CSV файл успешно сохранен на сервере: {csv_path} ({len(result_df)} записей, {len(result_df.columns)} колонок)")
         except Exception as e:
             logger.error(f"[server] КРИТИЧЕСКАЯ ОШИБКА: Не удалось сохранить CSV файл: {e}")
             csv_path = None
